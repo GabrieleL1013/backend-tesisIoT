@@ -7,6 +7,7 @@ import socket
 from paho.mqtt.client import Client as MQTTClient
 from paho.mqtt.properties import Properties
 from paho.mqtt.packettypes import PacketTypes
+from paho.mqtt.enums import CallbackAPIVersion # Solución para el DeprecationWarning
 
 API_URL_NODOS = "http://127.0.0.1:8000/api/nodos"
 API_URL_LECTURAS = "http://127.0.0.1:8000/api/lecturas"
@@ -30,6 +31,49 @@ def get_rc_description(rc):
         return MQTT_RC_MESSAGES.get(rc, f"Código de retorno/razón no estándar (rc={rc})")
     return str(rc)
 
+
+def normalizar_payload(payload_bruto, serial_esperado):
+    """
+    Analiza un JSON entrante y lo estandariza al formato que espera Laravel.
+    Retorna un diccionario limpio o None si el formato es totalmente desconocido.
+    """
+    payload_limpio = {}
+
+    # 1. Detectar formato ChirpStack / LoRaWAN
+    if "devEUI" in payload_bruto or "objectJSON" in payload_bruto:
+        dev_eui = payload_bruto.get("devEUI")
+        
+        if dev_eui and str(dev_eui) != str(serial_esperado):
+            return None # Es de otro sensor
+            
+        payload_limpio["Sensor"] = serial_esperado
+        
+        # Extraer los datos reales del sensor que ChirpStack decodificó
+        datos = payload_bruto.get("objectJSON", {})
+        if isinstance(datos, str):
+            import json
+            datos = json.loads(datos) # Por si viene como string
+            
+        # Fusionamos los datos limpios
+        payload_limpio.update(datos)
+        return payload_limpio
+
+    # 2. Detectar formato estricto (El de tu simulador actual)
+    elif "Sensor" in payload_bruto:
+        if str(payload_bruto["Sensor"]) != str(serial_esperado):
+            return None
+        return payload_bruto
+
+    # 3. Detectar formato genérico o descuidado (ej. solo envía temp y humedad)
+    elif "temperatura" in payload_bruto or "humedad" in payload_bruto:
+        payload_limpio["Sensor"] = serial_esperado
+        payload_limpio.update(payload_bruto)
+        return payload_limpio
+
+    # Si no encaja en nada conocido
+    return None
+
+
 class NodeListener(threading.Thread):
     def __init__(self, node_data):
         super().__init__()
@@ -46,9 +90,9 @@ class NodeListener(threading.Thread):
         self.password = node_data.get('password')
         self.region = node_data.get('region') or DEFAULT_REGION
         
-    def on_connect(self, client, userdata, flags, rc, properties=None):
+    def on_connect(self, client, userdata, flags, reason_code, properties=None):
         node_name = self.node_data.get('nombre', 'Desconocido')
-        if rc == 0:
+        if reason_code == 0:
             print(f"✅ [{node_name}] LISTENER Conectado exitosamente a {self.broker}:{self.port}")
             if self.topic_data:
                 self.client.subscribe(self.topic_data)
@@ -56,54 +100,53 @@ class NodeListener(threading.Thread):
             else:
                 print(f"⚠️ [{node_name}] Conectado pero no tiene 'topic_data' configurado para suscribirse.")
         else:
-            reason_desc = get_rc_description(rc)
+            reason_desc = get_rc_description(reason_code)
             print(
                 f"❌ [{node_name}] LISTENER Fallo de conexión MQTT con {self.broker}:{self.port}\n"
-                f"   ➔ Código rc: {rc}\n"
+                f"   ➔ Código rc: {reason_code}\n"
                 f"   ➔ Diagnóstico: {reason_desc}\n"
                 f"   ➔ Configuración: MQTT v{5 if self.use_v5 else 4}, Usuario: '{self.username or 'Sin usuario'}'"
             )
 
-    def on_disconnect(self, client, userdata, rc, properties=None):
+    def on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties=None):
         node_name = self.node_data.get('nombre', 'Desconocido')
-        if rc == 0:
+        if reason_code == 0:
             print(f"ℹ️ [{node_name}] LISTENER Desconectado limpiamente del broker ({self.broker}).")
         else:
-            reason_desc = get_rc_description(rc)
+            reason_desc = get_rc_description(reason_code)
             print(
                 f"⚠️ [{node_name}] LISTENER Desconexión imprevista del broker {self.broker}:{self.port}\n"
-                f"   ➔ Código rc: {rc} ({reason_desc})"
+                f"   ➔ Código rc: {reason_code} ({reason_desc})"
             )
 
     def on_message(self, client, userdata, msg):
         try:
-            payload = json.loads(msg.payload.decode('utf-8'))
+            payload_bruto = json.loads(msg.payload.decode('utf-8'))
+            serial_number = self.node_data.get('serial_number')
 
-            if not payload.get('Sensor'):
+            # Pasamos el JSON por el normalizador
+            payload_normalizado = normalizar_payload(payload_bruto, serial_number)
+
+            if not payload_normalizado:
                 print(
                     f"⚠️ [{self.node_data['nombre']}] "
-                    f"Mensaje descartado en {msg.topic}: falta Sensor"
+                    f"Mensaje ignorado o no reconocido en {msg.topic}: {payload_bruto}"
                 )
                 return
 
-            if not payload.get('region'):
-                payload['region'] = self.region
-
-            if str(payload['Sensor']) != str(
-                self.node_data.get('serial_number')
-            ):
-                return
+            if not payload_normalizado.get('region'):
+                payload_normalizado['region'] = self.region
 
             print(
                 f"📥 [{self.node_data['nombre']}] "
-                f"Recibido en {msg.topic}: {payload}"
+                f"Recibido y Traducido: {payload_normalizado}"
             )
 
             headers = {'Content-Type': 'application/json'}
 
             res = requests.post(
                 API_URL_LECTURAS,
-                json=payload,
+                json=payload_normalizado,
                 headers=headers,
                 timeout=5
             )
@@ -131,7 +174,9 @@ class NodeListener(threading.Thread):
         print(f"🔄 [{node_name}] Intentando conectar a broker MQTT {self.broker}:{self.port}...")
         try:
             protocol = 5 if self.use_v5 else 4
-            self.client = MQTTClient(client_id=self.client_id, protocol=protocol)
+            
+            # Se añade CallbackAPIVersion.VERSION2 como primer parámetro para quitar el DeprecationWarning
+            self.client = MQTTClient(CallbackAPIVersion.VERSION2, client_id=self.client_id, protocol=protocol)
             
             if self.username and self.password:
                 self.client.username_pw_set(self.username, self.password)
@@ -182,6 +227,7 @@ class NodeListener(threading.Thread):
             self.client.disconnect()
         print(f"⏹️ [{self.node_data.get('nombre', 'Desconocido')}] Listener detenido.")
 
+
 class MqttListenerManager:
     def __init__(self):
         self.active_listeners = {}
@@ -214,15 +260,31 @@ class MqttListenerManager:
 
         current_node_ids = {str(n['id']): n for n in nodes if n.get('topic_data')}
         
-        # 1. Iniciar nuevos listeners
+        # 1. Iniciar nuevos listeners o ACTUALIZAR los existentes
         for node_id, node_data in current_node_ids.items():
             if node_id not in self.active_listeners:
-                print(f"➕ Iniciando listener para: {node_data['nombre']}")
+                # Nodo completamente nuevo
+                print(f"➕ Iniciando listener para nuevo nodo: {node_data['nombre']}")
                 listener = NodeListener(node_data)
                 self.active_listeners[node_id] = listener
                 listener.start()
+            else:
+                # El nodo ya existe, comprobamos si algo cambió desde React/Laravel
+                existing_listener = self.active_listeners[node_id]
                 
-        # 2. Detener listeners de nodos eliminados/inactivos
+                # Comparamos la configuración guardada con la recién descargada
+                if existing_listener.node_data != node_data:
+                    print(f"✏️ Cambios detectados en el nodo: {node_data['nombre']}. Reiniciando su conexión...")
+                    
+                    # Detenemos SOLO la conexión de este nodo
+                    existing_listener.stop()
+                    
+                    # Creamos una nueva conexión con la data fresca
+                    new_listener = NodeListener(node_data)
+                    self.active_listeners[node_id] = new_listener
+                    new_listener.start()
+                
+        # 2. Detener listeners de nodos eliminados o desactivados
         ids_to_remove = []
         for node_id, listener in self.active_listeners.items():
             if node_id not in current_node_ids:
@@ -245,6 +307,7 @@ class MqttListenerManager:
             for l in self.active_listeners.values():
                 l.stop()
             print("👋 Adiós.")
+
 
 if __name__ == '__main__':
     manager = MqttListenerManager()
