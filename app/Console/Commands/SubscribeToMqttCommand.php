@@ -43,40 +43,44 @@ class SubscribeToMqttCommand extends Command
 
         try {
             foreach ($connections as $connection) {
-                $server = $connection['host'];
-                $port = (int) $connection['port'];
-                $clientId = $connection['client_id'] . '-' . rand(1000, 9999);
-                $topics = $requestedTopics ?? ($connection['topics'] ?? []);
+                try {
+                    $server = $connection['host'];
+                    $port = (int) $connection['port'];
+                    $clientId = $connection['client_id'] . '-' . rand(1000, 9999);
+                    $topics = $requestedTopics ?? ($connection['topics'] ?? []);
 
-                if (empty($topics)) {
-                    $this->warn('Conexion MQTT sin topics: ' . ($connection['name'] ?? $server));
-                    continue;
+                    if (empty($topics)) {
+                        $this->warn('Conexion MQTT sin topics: ' . ($connection['name'] ?? $server));
+                        continue;
+                    }
+
+                    $connectionSettings = (new ConnectionSettings)
+                        ->setKeepAliveInterval((int) ($connection['keep_alive'] ?? 60));
+
+                    if (!empty($connection['username'])) {
+                        $connectionSettings = $connectionSettings->setUsername((string) $connection['username']);
+                    }
+
+                    if (!empty($connection['password'])) {
+                        $connectionSettings = $connectionSettings->setPassword((string) $connection['password']);
+                    }
+
+                    $mqtt = new MqttClient($server, $port, $clientId, MqttClient::MQTT_3_1_1);
+                    $mqtt->connect($connectionSettings, $cleanSession);
+                    $this->info('Conectado exitosamente al broker MQTT [' . ($connection['name'] ?? $server) . "]: {$server}:{$port}");
+
+                    foreach ($topics as $topic) {
+                        $mqtt->subscribe($topic, function ($topic, $message) use ($telemetryIngestionService, $connection) {
+                            $this->info('Mensaje recibido [' . ($connection['name'] ?? 'mqtt') . "] en [$topic]");
+                            $this->processMessage($telemetryIngestionService, $topic, $message);
+                        }, (int) ($connection['qos'] ?? 0));
+                        $this->line('Suscrito [' . ($connection['name'] ?? $server) . "]: {$topic}");
+                    }
+
+                    $clients[] = $mqtt;
+                } catch (Exception $e) {
+                    $this->warn('No se pudo conectar al broker [' . ($connection['name'] ?? 'mqtt') . ']: ' . $e->getMessage());
                 }
-
-                $connectionSettings = (new ConnectionSettings)
-                    ->setKeepAliveInterval((int) ($connection['keep_alive'] ?? 60));
-
-                if (!empty($connection['username'])) {
-                    $connectionSettings = $connectionSettings->setUsername((string) $connection['username']);
-                }
-
-                if (!empty($connection['password'])) {
-                    $connectionSettings = $connectionSettings->setPassword((string) $connection['password']);
-                }
-
-                $mqtt = new MqttClient($server, $port, $clientId, MqttClient::MQTT_3_1_1);
-                $mqtt->connect($connectionSettings, $cleanSession);
-                $this->info('Conectado exitosamente al broker MQTT [' . ($connection['name'] ?? $server) . "]: {$server}:{$port}");
-
-                foreach ($topics as $topic) {
-                    $mqtt->subscribe($topic, function ($topic, $message) use ($telemetryIngestionService, $connection) {
-                        $this->info('Mensaje recibido [' . ($connection['name'] ?? 'mqtt') . "] en [$topic]");
-                        $this->processMessage($telemetryIngestionService, $topic, $message);
-                    }, (int) ($connection['qos'] ?? 0));
-                    $this->line('Suscrito [' . ($connection['name'] ?? $server) . "]: {$topic}");
-                }
-
-                $clients[] = $mqtt;
             }
 
             if ($clients === []) {

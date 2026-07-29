@@ -42,7 +42,7 @@ class TelemetryPayloadNormalizerTest extends TestCase
             ],
         ], 'application/1/device/AABBCCDDEEFF0011/event/up');
 
-        $this->assertSame('rak-node-01', $normalized['serial_number']);
+        $this->assertSame('AABBCCDDEEFF0011', $normalized['serial_number']);
         $this->assertSame(22.5, $normalized['metrics']['temperature']);
         $this->assertSame(58, $normalized['metrics']['humidity']);
         $this->assertSame(3.71, $normalized['metrics']['battery_voltage']);
@@ -83,5 +83,39 @@ class TelemetryPayloadNormalizerTest extends TestCase
         $this->assertArrayNotHasKey('sensor_status_board', $normalized['metrics']);
         $this->assertSame('2026-07-29 11:16:00', $normalized['dateTime']);
         $this->assertSame(1785341760, $normalized['timestamp']);
+    }
+
+    public function test_filters_status_flags_from_chirpstack_object_payload(): void
+    {
+        $normalizer = new TelemetryPayloadNormalizer();
+
+        $normalized = $normalizer->normalize([
+            'deviceInfo' => [
+                'deviceName' => 'Heltec V2',
+                'devEui' => '8aebbb6d6256a64f',
+            ],
+            'time' => '2026-07-29T17:51:44.933244147+00:00',
+            'object' => [
+                'ph_voltage_mv' => 994.0,
+                'dissolved_oxygen_mg_l' => 9.01,
+                'turbidity_adc_raw' => 1.0,
+                'turbidity_digital_valid' => false,
+                'turbidity_valid' => true,
+                'turbidity_digital_high' => null,
+                'ph' => 9.08,
+                'ph_valid' => true,
+                'flags' => 7.0,
+                'dissolved_oxygen_voltage_mv' => 746.0,
+                'turbidity_sensor_voltage_mv' => 2.0,
+                'dissolved_oxygen_valid' => true,
+            ],
+        ]);
+
+        $this->assertSame('8aebbb6d6256a64f', $normalized['serial_number']);
+        $this->assertSame(9.08, $normalized['metrics']['ph']);
+        $this->assertSame(9.01, $normalized['metrics']['dissolved_oxygen_mg_l']);
+        $this->assertArrayNotHasKey('flags', $normalized['metrics']);
+        $this->assertArrayNotHasKey('ph_valid', $normalized['metrics']);
+        $this->assertArrayNotHasKey('turbidity_valid', $normalized['metrics']);
     }
 }

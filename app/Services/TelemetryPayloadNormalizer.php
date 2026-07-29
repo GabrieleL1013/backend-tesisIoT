@@ -40,11 +40,11 @@ class TelemetryPayloadNormalizer
             data_get($payload, 'Sensor'),
             data_get($payload, 'sensor'),
             data_get($payload, 'serial_number'),
-            data_get($payload, 'deviceInfo.deviceName'),
             data_get($payload, 'deviceInfo.devEui'),
             data_get($payload, 'devEui'),
             data_get($payload, 'endDeviceIds.device_id'),
             data_get($payload, 'endDeviceIds.dev_eui'),
+            data_get($payload, 'deviceInfo.deviceName'),
         ];
 
         foreach ($serialCandidates as $candidate) {
@@ -68,6 +68,10 @@ class TelemetryPayloadNormalizer
         $metrics = [];
 
         foreach ($flatMetrics as $key => $value) {
+            if ($this->shouldIgnoreMetricKey($key)) {
+                continue;
+            }
+
             $normalizedValue = $this->normalizeMetricValue($value);
 
             if ($normalizedValue === null) {
@@ -78,6 +82,13 @@ class TelemetryPayloadNormalizer
         }
 
         return $metrics;
+    }
+
+    protected function shouldIgnoreMetricKey(string $key): bool
+    {
+        return $key === 'flags'
+            || str_ends_with($key, '_valid')
+            || str_ends_with($key, '_high');
     }
 
     protected function resolveMetricSource(array $payload): array
@@ -169,10 +180,6 @@ class TelemetryPayloadNormalizer
 
     protected function normalizeMetricValue(mixed $value): float|int|null
     {
-        if (is_bool($value)) {
-            return $value ? 1 : 0;
-        }
-
         if (is_int($value) || is_float($value)) {
             return $value;
         }
