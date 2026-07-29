@@ -284,6 +284,7 @@ class LecturaController extends Controller
                     $dateFormatted = $date->format('d/m/Y') . ', ' . $timeFormatted;
                     
                     $merged[$key] = [
+                        'timestamp' => $date->timestamp,
                         'dateTime' => $dateFormatted,
                         'shortTime' => $timeFormatted
                     ];

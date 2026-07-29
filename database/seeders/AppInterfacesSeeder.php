@@ -29,7 +29,7 @@ class AppInterfacesSeeder extends Seeder
             ['name' => 'Monitor En Vivo', 'path' => '/admin/monitor-en-vivo', 'description' => 'Telemetría en tiempo real'],
             ['name' => 'Histórico Agregado', 'path' => '/admin/historico', 'description' => 'Telemetría histórica y estadísticas'],
             ['name' => 'Notificaciones', 'path' => '/admin/notificaciones', 'description' => 'Buzón de notificaciones'],
-            ['name' => 'Modo de Edición (Textos)', 'path' => '/modo-edicion', 'description' => 'Habilita la edición visual de textos y secciones en la interfaz pública'],
+            ['name' => 'Modo de Edición', 'path' => '/modo-edicion', 'description' => 'Habilita la edición visual de elementos y secciones en la interfaz pública'],
         ];
 
         foreach ($interfaces as $iface) {

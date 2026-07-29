@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\NewsArticleController;
 use App\Http\Controllers\Api\ScientificArticleController;
 use App\Http\Controllers\Api\ContactMessageController;
 use App\Http\Controllers\Api\InterfaceTextController;
+use App\Http\Controllers\Api\InterfaceImageController;
 use App\Http\Controllers\Api\NodeAlertController;
 use App\Http\Controllers\Api\NodeHealthController;
 
@@ -35,6 +36,11 @@ use App\Http\Controllers\Api\PublicLecturaController;
 // Rutas para textos editables de la interfaz
 Route::get('/interface-texts', [InterfaceTextController::class, 'index']);
 Route::post('/interface-texts', [InterfaceTextController::class, 'store']);
+
+// Rutas para imágenes editables de la interfaz
+Route::get('/interface-images', [InterfaceImageController::class, 'index']);
+Route::post('/interface-images', [InterfaceImageController::class, 'store']);
+Route::delete('/interface-images/{key}', [InterfaceImageController::class, 'destroy']);
 
 // Rutas de telemetría y lecturas
 Route::post('/lecturas', [LecturaController::class, 'store']);
