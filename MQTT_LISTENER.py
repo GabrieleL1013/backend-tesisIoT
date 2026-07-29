@@ -1,3 +1,4 @@
+import os
 import time
 import json
 import threading
@@ -7,10 +8,21 @@ import socket
 from paho.mqtt.client import Client as MQTTClient
 from paho.mqtt.properties import Properties
 from paho.mqtt.packettypes import PacketTypes
-from paho.mqtt.enums import CallbackAPIVersion # Solución para el DeprecationWarning
+from paho.mqtt.enums import CallbackAPIVersion
 
-API_URL_NODOS = "http://127.0.0.1:8000/api/nodos"
-API_URL_LECTURAS = "http://127.0.0.1:8000/api/lecturas"
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+# IP y puerto centralizados para la comunicación con la API
+API_HOST = os.getenv("API_HOST", "127.0.0.1")
+API_PORT = os.getenv("API_PORT", "8000")
+
+API_BASE_URL = f"http://{API_HOST}:{API_PORT}/api"
+API_URL_NODOS = f"{API_BASE_URL}/nodos"
+API_URL_LECTURAS = f"{API_BASE_URL}/lecturas"
 DEFAULT_REGION = "us915_0"
 
 MQTT_RC_MESSAGES = {
@@ -39,32 +51,30 @@ def normalizar_payload(payload_bruto, serial_esperado):
     """
     payload_limpio = {}
 
-    # 1. Detectar formato ChirpStack / LoRaWAN
-    if "devEUI" in payload_bruto or "objectJSON" in payload_bruto:
-        dev_eui = payload_bruto.get("devEUI")
+    # 1. Detectar formato ChirpStack v4 (El hardware físico de la universidad)
+    if "deviceInfo" in payload_bruto and "object" in payload_bruto:
+        dev_eui = payload_bruto["deviceInfo"].get("devEui")
         
-        if dev_eui and str(dev_eui) != str(serial_esperado):
+        # Ignorar mayúsculas/minúsculas al comparar el serial
+        if dev_eui and str(dev_eui).lower() != str(serial_esperado).lower():
             return None # Es de otro sensor
             
         payload_limpio["Sensor"] = serial_esperado
         
-        # Extraer los datos reales del sensor que ChirpStack decodificó
-        datos = payload_bruto.get("objectJSON", {})
-        if isinstance(datos, str):
-            import json
-            datos = json.loads(datos) # Por si viene como string
+        # Extraer los datos físicos reales (pH, oxígeno, turbidez)
+        datos = payload_bruto.get("object", {})
             
         # Fusionamos los datos limpios
         payload_limpio.update(datos)
         return payload_limpio
 
-    # 2. Detectar formato estricto (El de tu simulador actual)
+    # 2. Detectar formato estricto (El de tu simulador de Zorin/Windows)
     elif "Sensor" in payload_bruto:
-        if str(payload_bruto["Sensor"]) != str(serial_esperado):
+        if str(payload_bruto["Sensor"]).lower() != str(serial_esperado).lower():
             return None
         return payload_bruto
 
-    # 3. Detectar formato genérico o descuidado (ej. solo envía temp y humedad)
+    # 3. Detectar formato genérico o descuidado
     elif "temperatura" in payload_bruto or "humedad" in payload_bruto:
         payload_limpio["Sensor"] = serial_esperado
         payload_limpio.update(payload_bruto)
