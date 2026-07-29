@@ -5,10 +5,9 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Lectura;
 use App\Models\Node;
-use App\Models\SubvariableTemplate;
+use App\Services\TelemetryIngestionService;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
-use App\Events\LecturaRecibida;
 use Illuminate\Support\Facades\Log;
 
 class LecturaController extends Controller
@@ -16,62 +15,24 @@ class LecturaController extends Controller
     /**
      * Recibe lecturas desde el script MQTT_LISTENER.py
      */
-    public function store(Request $request)
+    public function store(Request $request, TelemetryIngestionService $telemetryIngestionService)
     {
-        // Validar payload
-        $payload = $request->all();
-        if (!$payload || !isset($payload['Sensor'])) {
-            return response()->json(['error' => 'Payload inválido, falta Sensor'], 400);
+        $result = $telemetryIngestionService->ingestFromPayload($request->all());
+
+        if ($result['status'] !== 'processed') {
+            return response()->json([
+                'status' => 'ignored',
+                'message' => $result['reason'],
+            ], 422);
         }
 
-        $node = Node::where('serial_number', $payload['Sensor'])->first();
-        if (!$node) {
-            // Si el nodo no existe, se crea para pruebas
-            $node = new Node(['serial_number' => $payload['Sensor']]);
-        }
+        Log::info('Lectura procesada', $result);
 
-        $savedData = [];
-        
-        // Uso de caché para no hacer SELECT a la BD cada 5 segundos
-        $cacheKey = 'last_save_time_node_' . $node->id;
-        $lastSaveTime = \Illuminate\Support\Facades\Cache::get($cacheKey, 0);
-        $now = time();
-        $shouldSave = false;
-
-        $frequency = $node->save_frequency ?? 30;
-        if ($now - $lastSaveTime >= $frequency) {
-            $shouldSave = true;
-            \Illuminate\Support\Facades\Cache::put($cacheKey, $now, $frequency * 2);
-        }
-        
-        foreach ($payload as $key => $value) {
-            if (in_array($key, ['Sensor', 'timestamp', 'dateTime'])) {
-                continue;
-            }
-
-            // Buscar la subvariable pero SOLAMENTE entre las que pertenecen a este nodo
-            $subvariable = $node->subvariables()->where('clave_mqtt', $key)->first();
-            
-            if ($subvariable && $node->exists && $shouldSave) {
-                Lectura::create([
-                    'node_id' => $node->id,
-                    'subvariable_id' => $subvariable->id,
-                    'valor' => $value
-                ]);
-            }
-            $savedData[$key] = $value;
-        }
-        
-        if (!empty($savedData)) {
-            $savedData['timestamp'] = $payload['timestamp'] ?? time();
-            $savedData['dateTime'] = $payload['dateTime'] ?? now()->toDateTimeString();
-            
-            // Emitir evento por WebSockets
-            event(new LecturaRecibida($node, $savedData));
-            Log::info("Lectura procesada para nodo: " . $node->serial_number);
-        }
-
-        return response()->json(['status' => 'success', 'message' => 'Lecturas guardadas y emitidas']);
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Lecturas procesadas y emitidas',
+            'data' => $result,
+        ]);
     }
 
     /**
