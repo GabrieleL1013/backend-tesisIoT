@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\InterfaceText;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 class InterfaceTextController extends Controller
 {
@@ -13,7 +14,10 @@ class InterfaceTextController extends Controller
      */
     public function index()
     {
-        $texts = InterfaceText::pluck('text', 'key')->all();
+        $texts = Cache::remember('interface_texts_cache', 3600, function () {
+            return InterfaceText::pluck('text', 'key')->all();
+        });
+
         return response()->json($texts, 200, [], JSON_FORCE_OBJECT);
     }
 
@@ -32,6 +36,9 @@ class InterfaceTextController extends Controller
             ['text' => $validated['text']]
         );
 
+        Cache::forget('interface_texts_cache');
+
         return response()->json($interfaceText, 200);
     }
 }
+

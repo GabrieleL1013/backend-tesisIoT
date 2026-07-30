@@ -28,6 +28,11 @@ class DatabaseSeeder extends Seeder
 
         $this->call([
             AdminUserSeeder::class,
+            MetricTemplateSeeder::class,
+            LocationSeeder::class,
+            CategorySeeder::class,
+            NewsArticleSeeder::class,
+            ScientificArticleSeeder::class,
         ]);
     }
 }

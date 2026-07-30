@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\InterfaceImage;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 class InterfaceImageController extends Controller
 {
@@ -13,14 +14,18 @@ class InterfaceImageController extends Controller
      */
     public function index()
     {
-        $images = InterfaceImage::all(['key', 'image_data', 'mime_type']);
-        $result = [];
-        foreach ($images as $img) {
-            $result[$img->key] = [
-                'image_data' => $img->image_data,
-                'mime_type'  => $img->mime_type,
-            ];
-        }
+        $result = Cache::remember('interface_images_cache', 3600, function () {
+            $images = InterfaceImage::all(['key', 'image_data', 'mime_type']);
+            $res = [];
+            foreach ($images as $img) {
+                $res[$img->key] = [
+                    'image_data' => $img->image_data,
+                    'mime_type'  => $img->mime_type,
+                ];
+            }
+            return $res;
+        });
+
         return response()->json($result, 200, [], JSON_FORCE_OBJECT);
     }
 
@@ -43,6 +48,8 @@ class InterfaceImageController extends Controller
             ]
         );
 
+        Cache::forget('interface_images_cache');
+
         return response()->json([
             'key'       => $img->key,
             'mime_type' => $img->mime_type,
@@ -59,6 +66,10 @@ class InterfaceImageController extends Controller
             return response()->json(['message' => 'Imagen no encontrada'], 404);
         }
         $img->delete();
+
+        Cache::forget('interface_images_cache');
+
         return response()->json(['message' => 'Imagen eliminada correctamente'], 200);
     }
 }
+

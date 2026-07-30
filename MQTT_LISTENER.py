@@ -8,7 +8,13 @@ import socket
 from paho.mqtt.client import Client as MQTTClient
 from paho.mqtt.properties import Properties
 from paho.mqtt.packettypes import PacketTypes
-from paho.mqtt.enums import CallbackAPIVersion
+
+try:
+    from paho.mqtt.enums import CallbackAPIVersion
+    HAS_PAHO_V2 = True
+except ImportError:
+    HAS_PAHO_V2 = False
+    CallbackAPIVersion = None
 
 try:
     from dotenv import load_dotenv
@@ -185,8 +191,10 @@ class NodeListener(threading.Thread):
         try:
             protocol = 5 if self.use_v5 else 4
             
-            # Se añade CallbackAPIVersion.VERSION2 como primer parámetro para quitar el DeprecationWarning
-            self.client = MQTTClient(CallbackAPIVersion.VERSION2, client_id=self.client_id, protocol=protocol)
+            if HAS_PAHO_V2 and CallbackAPIVersion:
+                self.client = MQTTClient(CallbackAPIVersion.VERSION2, client_id=self.client_id, protocol=protocol)
+            else:
+                self.client = MQTTClient(client_id=self.client_id, protocol=protocol)
             
             if self.username and self.password:
                 self.client.username_pw_set(self.username, self.password)

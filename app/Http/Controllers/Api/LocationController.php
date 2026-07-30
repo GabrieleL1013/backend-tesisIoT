@@ -11,30 +11,6 @@ class LocationController extends Controller
     public function index()
     {
         $locations = Location::all();
-
-        // Seed default locations if database is empty on mount
-        if ($locations->isEmpty()) {
-            Location::create([
-                'nombre' => 'Campus Central ULEAM (Manta)',
-                'descripcion' => 'Campus principal de la Universidad Laica Eloy Alfaro de Manabí',
-                'latitud' => -0.952136,
-                'longitud' => -80.742337
-            ]);
-            Location::create([
-                'nombre' => 'Campus Chone ULEAM',
-                'descripcion' => 'Extensión Chone de la Universidad Laica Eloy Alfaro de Manabí',
-                'latitud' => -0.697424,
-                'longitud' => -80.098877
-            ]);
-            Location::create([
-                'nombre' => 'Campus Pedernales ULEAM',
-                'descripcion' => 'Extensión Pedernales - Monitoreo Costero',
-                'latitud' => 0.071850,
-                'longitud' => -80.052600
-            ]);
-            $locations = Location::all();
-        }
-
         return response()->json($locations);
     }
 
