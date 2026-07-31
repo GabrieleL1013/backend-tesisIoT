@@ -9,8 +9,86 @@ use Illuminate\Http\Request;
 
 class NodeController extends Controller
 {
-    public function index()
+    private function canSeeCredentials(Request $request): bool
     {
+        if (auth('sanctum')->check()) {
+            return true;
+        }
+        $clientIp = $request->ip();
+        return in_array($clientIp, ['127.0.0.1', '::1', 'localhost']);
+    }
+
+    public function index(Request $request)
+    {
+        $showCreds = auth('sanctum')->check();
+
+        $nodes = Node::with(['subvariables.metricTemplate', 'location', 'lecturas' => function($q) {
+            $q->latest('created_at')->limit(1);
+        }])->get();
+
+        $mapped = $nodes->map(function ($node) use ($showCreds) {
+            $lecturas = $node->subvariables->map(function ($sub) {
+                return [
+                    'sensor' => $sub->metricTemplate->nombre ?? 'Sensor Integrado',
+                    'data_type' => $sub->clave_mqtt,
+                    'tipo' => $sub->nombre,
+                    'unidad' => $sub->unidad,
+                    'minExpected' => $sub->min_expected,
+                    'maxExpected' => $sub->max_expected
+                ];
+            });
+
+            $isOnline = false;
+            if ($node->lecturas->isNotEmpty()) {
+                $lastReadingTime = \Carbon\Carbon::parse($node->lecturas->first()->created_at);
+                $isOnline = $lastReadingTime->diffInMinutes(now()) <= 5;
+            }
+
+            return [
+                'id' => (string)$node->id,
+                'nombre' => $node->nombre,
+                'serial_number' => $node->serial_number,
+                'ubicacion_id' => (string)$node->location_id,
+                'ubicacion_nombre' => $node->location->nombre ?? 'Campus Uleam Manta',
+                'latitud' => $node->location->latitud ?? '-0.951389',
+                'longitud' => $node->location->longitud ?? '-80.702476',
+                'categoria' => $node->categoria,
+                'lecturas' => $lecturas,
+                'estado' => $node->estado,
+                'is_online' => $isOnline,
+                'broker' => $showCreds ? $node->broker : null,
+                'port' => $showCreds ? $node->port : null,
+                'topic_data' => $showCreds ? $node->topic_data : null,
+                'client_id' => $showCreds ? $node->client_id : null,
+                'username' => $showCreds ? $node->username : null,
+                'password' => $showCreds ? $node->password : null,
+                'location_slug' => $showCreds ? $node->location_slug : null,
+                'use_mqtt_v5' => $showCreds ? $node->use_mqtt_v5 : null,
+                'is_simulated' => $showCreds ? $node->is_simulated : null,
+                'save_frequency' => $showCreds ? $node->save_frequency : null,
+                'instability_alert_interval' => $showCreds ? $node->instability_alert_interval : null
+            ];
+        });
+
+        return response()->json($mapped);
+    }
+
+    /**
+     * Endpoint interno reservado para los listeners y simuladores locales de Python (MQTT_LISTENER y SIMULATOR_MANAGER).
+     */
+    public function internalIndex(Request $request)
+    {
+        $clientIp = $request->ip();
+        $isLocalhost = in_array($clientIp, ['127.0.0.1', '::1', 'localhost']);
+        $internalSecret = $request->header('X-Internal-Secret');
+        $expectedSecret = env('INTERNAL_API_SECRET', config('app.key'));
+
+        $isAuthorized = $isLocalhost || (!empty($internalSecret) && !empty($expectedSecret) && hash_equals($expectedSecret, $internalSecret));
+
+        if (!$isAuthorized && !auth('sanctum')->check()) {
+            return response()->json(['message' => 'No autorizado para acceder a configuración interna de MQTT.'], 403);
+        }
+
         $nodes = Node::with(['subvariables.metricTemplate', 'location', 'lecturas' => function($q) {
             $q->latest('created_at')->limit(1);
         }])->get();
@@ -139,8 +217,9 @@ class NodeController extends Controller
         ], 201);
     }
 
-    public function show($id)
+    public function show(Request $request, $id)
     {
+        $showCreds = $this->canSeeCredentials($request);
         $node = Node::with(['subvariables.metricTemplate', 'location'])->findOrFail($id);
         
         $lecturas = $node->subvariables->map(function ($sub) {
@@ -165,12 +244,12 @@ class NodeController extends Controller
             'categoria' => $node->categoria,
             'lecturas' => $lecturas,
             'estado' => $node->estado,
-            'broker' => $node->broker,
-            'port' => $node->port,
+            'broker' => $showCreds ? $node->broker : null,
+            'port' => $showCreds ? $node->port : null,
             'topic_data' => $node->topic_data,
-            'client_id' => $node->client_id,
-            'username' => $node->username,
-            'password' => $node->password,
+            'client_id' => $showCreds ? $node->client_id : null,
+            'username' => $showCreds ? $node->username : null,
+            'password' => $showCreds ? $node->password : null,
             'location_slug' => $node->location_slug,
             'use_mqtt_v5' => $node->use_mqtt_v5,
             'is_simulated' => $node->is_simulated,

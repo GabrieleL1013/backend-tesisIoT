@@ -27,7 +27,7 @@ API_HOST = os.getenv("API_HOST", "127.0.0.1")
 API_PORT = os.getenv("API_PORT", "8000")
 
 API_BASE_URL = f"http://{API_HOST}:{API_PORT}/api"
-API_URL_NODOS = f"{API_BASE_URL}/nodos"
+API_URL_NODOS = f"{API_BASE_URL}/nodos/internal"
 API_URL_LECTURAS = f"{API_BASE_URL}/lecturas"
 DEFAULT_REGION = "us915_0"
 
@@ -158,7 +158,11 @@ class NodeListener(threading.Thread):
                 f"Recibido y Traducido: {payload_normalizado}"
             )
 
-            headers = {'Content-Type': 'application/json'}
+            secret = os.getenv("INTERNAL_API_SECRET", "tesis_iot_internal_secret_2026")
+            headers = {
+                'Content-Type': 'application/json',
+                'X-Internal-Secret': secret
+            }
 
             res = requests.post(
                 API_URL_LECTURAS,

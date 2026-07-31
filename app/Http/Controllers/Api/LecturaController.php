@@ -18,16 +18,30 @@ class LecturaController extends Controller
      */
     public function store(Request $request)
     {
-        // Validar payload
+        // 1. Validar autorización de servicio interno (localhost, Sanctum o cabecera X-Internal-Secret)
+        $internalSecret = $request->header('X-Internal-Secret') ?: $request->header('x-internal-secret');
+        $expectedSecret = env('INTERNAL_API_SECRET', 'tesis_iot_internal_secret_2026');
+        $clientIp = $request->ip();
+        $isLocalhost = in_array($clientIp, ['127.0.0.1', '::1', 'localhost']);
+        
+        $isAuthorized = $isLocalhost || 
+                        auth('sanctum')->check() || 
+                        (!empty($internalSecret) && hash_equals($expectedSecret, $internalSecret));
+
+        if (!$isAuthorized) {
+            return response()->json(['error' => 'No autorizado para enviar lecturas de telemetría.'], 401);
+        }
+
+        // 2. Validar payload
         $payload = $request->all();
         if (!$payload || !isset($payload['Sensor'])) {
             return response()->json(['error' => 'Payload inválido, falta Sensor'], 400);
         }
 
+        // 3. Verificar que el nodo esté previamente registrado en el sistema
         $node = Node::where('serial_number', $payload['Sensor'])->first();
         if (!$node) {
-            // Si el nodo no existe, se crea para pruebas
-            $node = new Node(['serial_number' => $payload['Sensor']]);
+            return response()->json(['error' => "El nodo con identificador '{$payload['Sensor']}' no está registrado en el sistema."], 404);
         }
 
         $savedData = [];
@@ -66,8 +80,12 @@ class LecturaController extends Controller
             $savedData['timestamp'] = $payload['timestamp'] ?? time();
             $savedData['dateTime'] = $payload['dateTime'] ?? now()->toDateTimeString();
             
-            // Emitir evento por WebSockets
-            event(new LecturaRecibida($node, $savedData));
+            // Emitir evento por WebSockets de forma segura
+            try {
+                event(new LecturaRecibida($node, $savedData));
+            } catch (\Throwable $e) {
+                Log::warning("No se pudo transmitir evento WebSocket por Reverb (servidor offline): " . $e->getMessage());
+            }
             Log::info("Lectura procesada para nodo: " . $node->serial_number);
         }
 

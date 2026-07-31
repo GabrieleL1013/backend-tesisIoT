@@ -10,7 +10,7 @@ from paho.mqtt.properties import Properties
 from paho.mqtt.packettypes import PacketTypes
 
 # Configuración del Backend de Laravel
-API_URL = "http://127.0.0.1:8000/api/nodos"
+API_URL = "http://127.0.0.1:8000/api/nodos/internal"
 
 class VirtualNode(threading.Thread):
     def __init__(self, node_data):

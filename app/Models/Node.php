@@ -54,4 +54,52 @@ class Node extends Model
     {
         return $this->hasMany(NodeAlert::class, 'node_id');
     }
+
+    public function getUsernameAttribute($value)
+    {
+        if (empty($value)) return $value;
+        try {
+            return \Illuminate\Support\Facades\Crypt::decryptString($value);
+        } catch (\Throwable $e) {
+            return $value;
+        }
+    }
+
+    public function setUsernameAttribute($value)
+    {
+        if (empty($value)) {
+            $this->attributes['username'] = null;
+        } else {
+            try {
+                \Illuminate\Support\Facades\Crypt::decryptString($value);
+                $this->attributes['username'] = $value;
+            } catch (\Throwable $e) {
+                $this->attributes['username'] = \Illuminate\Support\Facades\Crypt::encryptString($value);
+            }
+        }
+    }
+
+    public function getPasswordAttribute($value)
+    {
+        if (empty($value)) return $value;
+        try {
+            return \Illuminate\Support\Facades\Crypt::decryptString($value);
+        } catch (\Throwable $e) {
+            return $value;
+        }
+    }
+
+    public function setPasswordAttribute($value)
+    {
+        if (empty($value)) {
+            $this->attributes['password'] = null;
+        } else {
+            try {
+                \Illuminate\Support\Facades\Crypt::decryptString($value);
+                $this->attributes['password'] = $value;
+            } catch (\Throwable $e) {
+                $this->attributes['password'] = \Illuminate\Support\Facades\Crypt::encryptString($value);
+            }
+        }
+    }
 }
