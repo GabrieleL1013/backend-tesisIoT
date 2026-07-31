@@ -103,11 +103,11 @@ class PublicLecturaController extends Controller
                 'tipo' => $sub->nombre,
                 'unidad' => $sub->unidad,
                 'icono' => $sub->icono,
-                'promedio' => $globalStats && $globalStats->promedio !== null ? round((float)$globalStats->promedio, 1) : 0,
-                'min' => $minRecord ? round((float)$minRecord->valor, 1) : 0,
-                'min_fecha' => $minRecord ? $minRecord->created_at->copy()->setTimezone('America/Guayaquil')->format('d/m/Y, h:i a') : '--',
-                'max' => $maxRecord ? round((float)$maxRecord->valor, 1) : 0,
-                'max_fecha' => $maxRecord ? $maxRecord->created_at->copy()->setTimezone('America/Guayaquil')->format('d/m/Y, h:i a') : '--',
+                'promedio' => ($globalStats && $globalStats->total > 0 && $globalStats->promedio !== null) ? round((float)$globalStats->promedio, 1) : null,
+                'min' => $minRecord ? round((float)$minRecord->valor, 1) : null,
+                'min_fecha' => $minRecord ? $minRecord->created_at->copy()->setTimezone('America/Guayaquil')->format('d/m/Y, h:i:s a') : '--',
+                'max' => $maxRecord ? round((float)$maxRecord->valor, 1) : null,
+                'max_fecha' => $maxRecord ? $maxRecord->created_at->copy()->setTimezone('America/Guayaquil')->format('d/m/Y, h:i:s a') : '--',
                 'total' => $globalStats ? (int)$globalStats->total : 0
             ];
 
@@ -127,7 +127,7 @@ class PublicLecturaController extends Controller
 
             $seriesResult[$clave] = $rows->map(function ($row) use ($intervalMinutes) {
                 $date = Carbon::parse($row->fecha_agrupada)->setTimezone('America/Guayaquil');
-                $label = $intervalMinutes >= 1440 ? $date->format('d/m') : $date->format('d/m H:i');
+                $label = $intervalMinutes >= 1440 ? $date->format('d/m/Y') : $date->format('d/m/Y H:i');
                 return [
                     'valor' => round((float)$row->valor_promedio, 1),
                     'min' => round((float)$row->valor_min, 1),
