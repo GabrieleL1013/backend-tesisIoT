@@ -10,8 +10,10 @@ class NewsArticle extends Model
 
     protected $fillable = [
         'titulo',
+        'titulo_en',
         'autor',
         'contenido',
+        'contenido_en',
         'imagen_url',
         'estado'
     ];

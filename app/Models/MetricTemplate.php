@@ -9,7 +9,7 @@ class MetricTemplate extends Model
 {
     protected $table = 'metric_templates';
     
-    protected $fillable = ['nombre', 'imagen'];
+    protected $fillable = ['nombre', 'nombre_en', 'imagen'];
 
     public function subvariables(): HasMany
     {

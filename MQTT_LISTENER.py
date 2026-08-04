@@ -100,7 +100,8 @@ class NodeListener(threading.Thread):
         self.client_id = f"listener-{node_data.get('serial_number')}-{random.randint(100,999)}" if node_data.get('serial_number') else f"listener-{random.randint(1000,9999)}"
         self.broker = node_data.get('broker') or 'broker.hivemq.com'
         self.port = int(node_data.get('port') or 1883)
-        self.topic_data = node_data.get('topic_data')
+        loc_slug = node_data.get('location_slug') if (node_data.get('location_slug') and isinstance(node_data.get('location_slug'), str)) else (node_data.get('serial_number') or 'general')
+        self.topic_data = node_data.get('topic_data') or f"iot_uleam/{loc_slug}"
         self.use_v5 = bool(node_data.get('use_mqtt_v5', False))
         self.username = node_data.get('username')
         self.password = node_data.get('password')
@@ -245,8 +246,11 @@ class NodeListener(threading.Thread):
     def stop(self):
         self.is_running = False
         if self.client:
-            self.client.loop_stop()
-            self.client.disconnect()
+            try:
+                self.client.loop_stop()
+                self.client.disconnect()
+            except Exception:
+                pass
         print(f"⏹️ [{self.node_data.get('nombre', 'Desconocido')}] Listener detenido.")
 
 
@@ -275,12 +279,7 @@ class MqttListenerManager:
         print("🔄 Sincronizando oyentes MQTT desde la BD...")
         nodes = self.fetch_active_nodes()
         
-        # Reportar nodos activos sin topic_data configurado
-        for n in nodes:
-            if not n.get('topic_data'):
-                print(f"⚠️ [Nodo: {n.get('nombre', 'ID ' + str(n.get('id')))}] Está ACTIVO pero NO tiene 'topic_data' configurado.")
-
-        current_node_ids = {str(n['id']): n for n in nodes if n.get('topic_data')}
+        current_node_ids = {str(n['id']): n for n in nodes}
         
         # 1. Iniciar nuevos listeners o ACTUALIZAR los existentes
         for node_id, node_data in current_node_ids.items():

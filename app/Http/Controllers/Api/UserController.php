@@ -10,6 +10,16 @@ use Illuminate\Support\Facades\Hash;
 class UserController extends Controller
 {
     /**
+     * Retorna únicamente el conteo total de usuarios registrados en el sistema.
+     */
+    public function count()
+    {
+        return response()->json([
+            'total_users' => User::count()
+        ]);
+    }
+
+    /**
      * Devuelve el listado de todos los usuarios en la base de datos.
      */
     public function index()

@@ -14,12 +14,21 @@ class AdminUserSeeder extends Seeder
      */
     public function run(): void
     {
+        $role = \App\Models\Role::firstOrCreate(
+            ['name' => 'Superusuario'],
+            [
+                'description' => 'Rol principal con acceso total al sistema',
+                'color' => '#10b981',
+                'level_permission' => 10,
+            ]
+        );
+
         User::updateOrCreate(
             ['email' => 'admin@test.com'],
             [
                 'name' => 'Admin de Prueba',
                 'password' => Hash::make('password123'),
-                'rol' => 'Superusuario'
+                'role_id' => $role->id,
             ]
         );
     }

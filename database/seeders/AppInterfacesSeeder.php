@@ -2,9 +2,8 @@
 
 namespace Database\Seeders;
 
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
+use App\Models\AppInterface;
 use Illuminate\Database\Seeder;
-use Illuminate\Support\Facades\DB;
 
 class AppInterfacesSeeder extends Seeder
 {
@@ -13,35 +12,182 @@ class AppInterfacesSeeder extends Seeder
      */
     public function run(): void
     {
-        DB::table('app_interfaces')->truncate();
-
         $interfaces = [
-            ['name' => 'Dashboard', 'path' => '/admin/dashboard', 'description' => 'Panel de inicio'],
-            ['name' => 'Nodos Sensores', 'path' => '/admin/nodos', 'description' => 'Gestión de nodos y dispositivos'],
-            ['name' => 'Categorías de Nodos', 'path' => '/admin/categorias', 'description' => 'Gestión de líneas de investigación'],
-            ['name' => 'Métricas de Nodos', 'path' => '/admin/metricas', 'description' => 'Gestión de variables a medir'],
-            ['name' => 'Ubicaciones', 'path' => '/admin/ubicaciones', 'description' => 'Mapa y coordenadas'],
-            ['name' => 'Usuarios', 'path' => '/admin/usuarios', 'description' => 'Gestión de usuarios'],
-            ['name' => 'Roles', 'path' => '/admin/roles', 'description' => 'Gestión de roles'],
-            ['name' => 'Interfaces', 'path' => '/admin/interfaces', 'description' => 'Gestión de permisos de interfaces'],
-            ['name' => 'Noticias', 'path' => '/admin/noticias', 'description' => 'Gestión de noticias públicas'],
-            ['name' => 'Artículos', 'path' => '/admin/articulos', 'description' => 'Gestión de artículos científicos'],
-            ['name' => 'Monitor En Vivo', 'path' => '/admin/monitor-en-vivo', 'description' => 'Telemetría en tiempo real'],
-            ['name' => 'Histórico Agregado', 'path' => '/admin/historico', 'description' => 'Telemetría histórica y estadísticas'],
-            ['name' => 'Notificaciones', 'path' => '/admin/notificaciones', 'description' => 'Buzón de notificaciones'],
-            ['name' => 'Modo de Edición', 'path' => '/modo-edicion', 'description' => 'Habilita la edición visual de elementos y secciones en la interfaz pública'],
+            // ── Interfaces Administrativas ──
+            [
+                'name' => 'Dashboard Admin',
+                'name_es' => 'Dashboard Admin',
+                'name_en' => 'Admin Dashboard',
+                'path' => '/es/admin/dashboard',
+                'path_es' => '/es/admin/dashboard',
+                'path_en' => '/en/admin/dashboard',
+                'description' => 'Panel principal de métricas y resumen del sistema',
+                'allowed_roles' => [1, 2],
+                'min_level' => 10,
+            ],
+            [
+                'name' => 'Nodos Sensores',
+                'name_es' => 'Nodos Sensores',
+                'name_en' => 'Sensor Nodes',
+                'path' => '/es/admin/nodos',
+                'path_es' => '/es/admin/nodos',
+                'path_en' => '/en/admin/nodes',
+                'description' => 'Gestión de nodos y dispositivos IoT',
+                'allowed_roles' => [1, 2],
+                'min_level' => 10,
+            ],
+            [
+                'name' => 'Categorías de Nodos',
+                'name_es' => 'Categorías de Nodos',
+                'name_en' => 'Node Categories',
+                'path' => '/es/admin/categorias',
+                'path_es' => '/es/admin/categorias',
+                'path_en' => '/en/admin/categories',
+                'description' => 'Gestión de líneas y áreas de investigación',
+                'allowed_roles' => [1, 2],
+                'min_level' => 10,
+            ],
+            [
+                'name' => 'Métricas de Nodos',
+                'name_es' => 'Métricas de Nodos',
+                'name_en' => 'Node Metrics',
+                'path' => '/es/admin/metricas',
+                'path_es' => '/es/admin/metricas',
+                'path_en' => '/en/admin/metrics',
+                'description' => 'Gestión de plantillas y variables de medición',
+                'allowed_roles' => [1, 2],
+                'min_level' => 10,
+            ],
+            [
+                'name' => 'Ubicaciones',
+                'name_es' => 'Ubicaciones',
+                'name_en' => 'Locations',
+                'path' => '/es/admin/ubicaciones',
+                'path_es' => '/es/admin/ubicaciones',
+                'path_en' => '/en/admin/locations',
+                'description' => 'Gestión de ubicaciones físicas y coordenadas GPS',
+                'allowed_roles' => [1, 2],
+                'min_level' => 10,
+            ],
+            [
+                'name' => 'Usuarios',
+                'name_es' => 'Usuarios',
+                'name_en' => 'Users',
+                'path' => '/es/admin/usuarios',
+                'path_es' => '/es/admin/usuarios',
+                'path_en' => '/en/admin/users',
+                'description' => 'Gestión de usuarios y cuentas del sistema',
+                'allowed_roles' => [1, 2],
+                'min_level' => 10,
+            ],
+            [
+                'name' => 'Roles',
+                'name_es' => 'Roles',
+                'name_en' => 'Roles',
+                'path' => '/es/admin/roles',
+                'path_es' => '/es/admin/roles',
+                'path_en' => '/en/admin/roles',
+                'description' => 'Gestión de roles y niveles de permiso',
+                'allowed_roles' => [1, 2],
+                'min_level' => 10,
+            ],
+            [
+                'name' => 'Interfaces',
+                'name_es' => 'Interfaces',
+                'name_en' => 'Interfaces',
+                'path' => '/es/admin/interfaces',
+                'path_es' => '/es/admin/interfaces',
+                'path_en' => '/en/admin/interfaces',
+                'description' => 'Gestión de permisos de accesibilidad de interfaces',
+                'allowed_roles' => [1, 2],
+                'min_level' => 10,
+            ],
+            [
+                'name' => 'Noticias (Admin)',
+                'name_es' => 'Noticias (Admin)',
+                'name_en' => 'News (Admin)',
+                'path' => '/es/admin/noticias',
+                'path_es' => '/es/admin/noticias',
+                'path_en' => '/en/admin/news',
+                'description' => 'Gestión de publicación de noticias',
+                'allowed_roles' => [1, 2],
+                'min_level' => 10,
+            ],
+            [
+                'name' => 'Artículos (Admin)',
+                'name_es' => 'Artículos (Admin)',
+                'name_en' => 'Articles (Admin)',
+                'path' => '/es/admin/articulos',
+                'path_es' => '/es/admin/articulos',
+                'path_en' => '/en/admin/articles',
+                'description' => 'Gestión de publicaciones de artículos científicos',
+                'allowed_roles' => [1, 2],
+                'min_level' => 10,
+            ],
+            [
+                'name' => 'Monitor En Vivo',
+                'name_es' => 'Monitor En Vivo',
+                'name_en' => 'Live Monitor',
+                'path' => '/es/admin/monitor-en-vivo',
+                'path_es' => '/es/admin/monitor-en-vivo',
+                'path_en' => '/en/admin/live-monitor',
+                'description' => 'Panel de monitorización técnica de tramas de telemetría',
+                'allowed_roles' => [1, 2],
+                'min_level' => 10,
+            ],
+            [
+                'name' => 'Histórico Agregado',
+                'name_es' => 'Histórico Agregado',
+                'name_en' => 'Aggregated History',
+                'path' => '/es/admin/historico',
+                'path_es' => '/es/admin/historico',
+                'path_en' => '/en/admin/history',
+                'description' => 'Consulta técnica de históricos agregados y exportación',
+                'allowed_roles' => [1, 2],
+                'min_level' => 10,
+            ],
+            [
+                'name' => 'Notificaciones',
+                'name_es' => 'Notificaciones',
+                'name_en' => 'Notifications',
+                'path' => '/es/admin/notificaciones',
+                'path_es' => '/es/admin/notificaciones',
+                'path_en' => '/en/admin/notifications',
+                'description' => 'Buzón y log de alertas emitidas por sensores',
+                'allowed_roles' => [1, 2],
+                'min_level' => 10,
+            ],
+            [
+                'name' => 'Modo de Edición',
+                'name_es' => 'Modo de Edición',
+                'name_en' => 'Edit Mode',
+                'path' => '/modo-edicion',
+                'path_es' => '/modo-edicion',
+                'path_en' => '/edit-mode',
+                'description' => 'Habilita la edición visual de textos y secciones en la interfaz',
+                'allowed_roles' => [1, 2],
+                'min_level' => 10,
+            ],
         ];
 
+        // Eliminar registros de la base de datos que ya no forman parte del catálogo administrativo
+        $allowedNames = array_column($interfaces, 'name');
+        AppInterface::whereNotIn('name', $allowedNames)->delete();
+
         foreach ($interfaces as $iface) {
-            DB::table('app_interfaces')->insert([
-                'name' => $iface['name'],
-                'path' => $iface['path'],
-                'description' => $iface['description'],
-                'allowed_roles' => json_encode([1, 2]),
-                'min_level' => 10,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
+            AppInterface::updateOrCreate(
+                ['name' => $iface['name']],
+                [
+                    'name_es' => $iface['name_es'],
+                    'name_en' => $iface['name_en'],
+                    'path' => $iface['path'],
+                    'path_es' => $iface['path_es'],
+                    'path_en' => $iface['path_en'],
+                    'description' => $iface['description'],
+                    'allowed_roles' => $iface['allowed_roles'],
+                    'min_level' => $iface['min_level'],
+                ]
+            );
         }
     }
 }

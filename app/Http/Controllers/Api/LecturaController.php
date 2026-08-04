@@ -79,6 +79,24 @@ class LecturaController extends Controller
         if (!empty($savedData)) {
             $savedData['timestamp'] = $payload['timestamp'] ?? time();
             $savedData['dateTime'] = $payload['dateTime'] ?? now()->toDateTimeString();
+
+            // Guardar en buffer en vivo (memoria caché) para streaming inmediato independientemente de la BD
+            $bufferKey = 'live_buffer_node_' . $node->serial_number;
+            $currentBuffer = \Illuminate\Support\Facades\Cache::get($bufferKey, []);
+            $shouldAppend = true;
+            if (!empty($currentBuffer)) {
+                $last = end($currentBuffer);
+                if (isset($last['dateTime']) && $last['dateTime'] === $savedData['dateTime']) {
+                    $shouldAppend = false;
+                }
+            }
+            if ($shouldAppend) {
+                $currentBuffer[] = $savedData;
+                if (count($currentBuffer) > 10) {
+                    $currentBuffer = array_slice($currentBuffer, -10);
+                }
+                \Illuminate\Support\Facades\Cache::put($bufferKey, $currentBuffer, 600);
+            }
             
             // Emitir evento por WebSockets de forma segura
             try {
@@ -122,14 +140,21 @@ class LecturaController extends Controller
             });
         }
 
+        $parseLocalCarbon = function($itemDate) {
+            if (!$itemDate) return Carbon::now('America/Guayaquil');
+            if ($itemDate instanceof Carbon) {
+                return $itemDate->copy()->setTimezone('America/Guayaquil');
+            }
+            return Carbon::parse($itemDate)->setTimezone('America/Guayaquil');
+        };
+
         // MODO: HORA ESPECÍFICA (Agrupación manual de X minutos en memoria)
         if ($filterMode === 'hour') {
             $dateStr = $request->input('start_date', Carbon::now('America/Guayaquil')->format('Y-m-d'));
             $hourInput = $request->has('hour') ? $request->input('hour') : Carbon::now('America/Guayaquil')->hour;
             $hourStr = str_pad((int) $hourInput, 2, '0', STR_PAD_LEFT);
             
-            // Convertir hora local a UTC para consultar DB
-            $start = Carbon::createFromFormat('Y-m-d H:i:s', "$dateStr $hourStr:00:00", 'America/Guayaquil')->setTimezone('UTC');
+            $start = Carbon::createFromFormat('Y-m-d H:i:s', "$dateStr $hourStr:00:00", 'America/Guayaquil');
             $end = $start->copy()->addHour();
 
             $intervalMinutes = (int) $request->input('interval', 5);
@@ -138,24 +163,24 @@ class LecturaController extends Controller
             $lecturasRaw = $query->orderBy('created_at', 'asc')->get();
 
             // Agrupar en bloques de X minutos
-            $grouped = $lecturasRaw->groupBy(function($item) use ($intervalMinutes) {
-                $d = Carbon::parse($item->created_at)->setTimezone('America/Guayaquil');
+            $grouped = $lecturasRaw->groupBy(function($item) use ($intervalMinutes, $parseLocalCarbon) {
+                $d = $parseLocalCarbon($item->created_at);
                 $min = (int) (floor($d->minute / $intervalMinutes) * $intervalMinutes);
                 $d->minute = $min;
                 $d->second = 0;
                 return $d->format('Y-m-d H:i');
             });
 
-            $lecturasMap = $grouped->map(function($items, $key) use ($intervalMinutes) {
-                $startCarbon = Carbon::parse($key);
+            $lecturasMap = $grouped->map(function($items, $key) use ($intervalMinutes, $parseLocalCarbon) {
+                $startCarbon = Carbon::createFromFormat('Y-m-d H:i', $key, 'America/Guayaquil');
                 $endCarbon = $startCarbon->copy()->addMinutes($intervalMinutes)->subSecond();
                 $label = $startCarbon->format('H:i:s') . ' - ' . $endCarbon->format('H:i:s');
 
                 $minItem = $items->sortBy('valor')->first();
                 $maxItem = $items->sortByDesc('valor')->first();
 
-                $minAt = $minItem ? Carbon::parse($minItem->created_at)->setTimezone('America/Guayaquil')->format('H:i:s') : null;
-                $maxAt = $maxItem ? Carbon::parse($maxItem->created_at)->setTimezone('America/Guayaquil')->format('H:i:s') : null;
+                $minAt = $minItem ? $parseLocalCarbon($minItem->created_at)->format('H:i:s') : null;
+                $maxAt = $maxItem ? $parseLocalCarbon($maxItem->created_at)->format('H:i:s') : null;
 
                 return [
                     'valor' => round($items->avg('valor'), 2),
@@ -176,16 +201,28 @@ class LecturaController extends Controller
             $startStr = $request->input('start_date', Carbon::now('America/Guayaquil')->subDays(7)->format('Y-m-d'));
             $endStr = $request->input('end_date', Carbon::now('America/Guayaquil')->format('Y-m-d'));
             
-            $start = Carbon::createFromFormat('Y-m-d H:i:s', "$startStr 00:00:00", 'America/Guayaquil')->setTimezone('UTC');
-            $end = Carbon::createFromFormat('Y-m-d H:i:s', "$endStr 23:59:59", 'America/Guayaquil')->setTimezone('UTC');
+            $start = Carbon::createFromFormat('Y-m-d H:i:s', "$startStr 00:00:00", 'America/Guayaquil');
+            $end = Carbon::createFromFormat('Y-m-d H:i:s', "$endStr 23:59:59", 'America/Guayaquil');
             
             $intervalMinutes = (int) $request->input('interval', 1440);
 
             $query->whereBetween('created_at', [$start, $end]);
             $lecturasRaw = $query->orderBy('created_at', 'asc')->get();
 
-            $grouped = $lecturasRaw->groupBy(function($item) use ($startStr, $intervalMinutes) {
-                $d = Carbon::parse($item->created_at)->setTimezone('America/Guayaquil');
+            if ($intervalMinutes === 0) {
+                $lecturasMap = $lecturasRaw->map(function($item) use ($parseLocalCarbon) {
+                    $d = $parseLocalCarbon($item->created_at);
+                    return [
+                        'valor' => is_numeric($item->valor) ? round((float)$item->valor, 2) : $item->valor,
+                        'fecha' => $d->toIso8601String(),
+                        'label' => $d->format('d/m/Y H:i:s')
+                    ];
+                });
+                return response()->json($lecturasMap);
+            }
+
+            $grouped = $lecturasRaw->groupBy(function($item) use ($startStr, $intervalMinutes, $parseLocalCarbon) {
+                $d = $parseLocalCarbon($item->created_at);
                 $startLocal = Carbon::createFromFormat('Y-m-d H:i:s', "$startStr 00:00:00", 'America/Guayaquil');
                 $diffMinutes = $startLocal->diffInMinutes($d, false);
                 if ($diffMinutes < 0) $diffMinutes = 0;
@@ -194,14 +231,14 @@ class LecturaController extends Controller
                 return $bucketStart->format('Y-m-d H:i');
             });
 
-            $lecturasMap = $grouped->map(function($items, $key) use ($intervalMinutes) {
-                $startCarbon = Carbon::parse($key);
+            $lecturasMap = $grouped->map(function($items, $key) use ($intervalMinutes, $parseLocalCarbon) {
+                $startCarbon = Carbon::createFromFormat('Y-m-d H:i', $key, 'America/Guayaquil');
 
                 $minItem = $items->sortBy('valor')->first();
                 $maxItem = $items->sortByDesc('valor')->first();
 
-                $minAt = $minItem ? Carbon::parse($minItem->created_at)->setTimezone('America/Guayaquil')->format('H:i:s') : null;
-                $maxAt = $maxItem ? Carbon::parse($maxItem->created_at)->setTimezone('America/Guayaquil')->format('H:i:s') : null;
+                $minAt = $minItem ? $parseLocalCarbon($minItem->created_at)->format('H:i:s') : null;
+                $maxAt = $maxItem ? $parseLocalCarbon($maxItem->created_at)->format('H:i:s') : null;
 
                 $label = $intervalMinutes >= 1440 ? $startCarbon->format('d/m') : $startCarbon->format('d/m H:i');
 
@@ -222,16 +259,16 @@ class LecturaController extends Controller
         // MODO: DÍA (Agrupación manual en memoria por X minutos)
         if ($filterMode === 'day') {
             $dateStr = $request->input('start_date', Carbon::now('America/Guayaquil')->format('Y-m-d'));
-            $start = Carbon::createFromFormat('Y-m-d H:i:s', "$dateStr 00:00:00", 'America/Guayaquil')->setTimezone('UTC');
-            $end = Carbon::createFromFormat('Y-m-d H:i:s', "$dateStr 23:59:59", 'America/Guayaquil')->setTimezone('UTC');
+            $start = Carbon::createFromFormat('Y-m-d H:i:s', "$dateStr 00:00:00", 'America/Guayaquil');
+            $end = Carbon::createFromFormat('Y-m-d H:i:s', "$dateStr 23:59:59", 'America/Guayaquil');
             
             $intervalMinutes = (int) $request->input('interval', 60);
 
             $query->whereBetween('created_at', [$start, $end]);
             $lecturasRaw = $query->orderBy('created_at', 'asc')->get();
 
-            $grouped = $lecturasRaw->groupBy(function($item) use ($intervalMinutes) {
-                $d = Carbon::parse($item->created_at)->setTimezone('America/Guayaquil');
+            $grouped = $lecturasRaw->groupBy(function($item) use ($intervalMinutes, $parseLocalCarbon) {
+                $d = $parseLocalCarbon($item->created_at);
                 $minutesOfDay = $d->hour * 60 + $d->minute;
                 $bucketMinutes = (int) (floor($minutesOfDay / $intervalMinutes) * $intervalMinutes);
                 
@@ -245,16 +282,16 @@ class LecturaController extends Controller
                 return $d->format('Y-m-d H:i');
             });
 
-            $lecturasMap = $grouped->map(function($items, $key) use ($intervalMinutes) {
-                $startCarbon = Carbon::parse($key);
+            $lecturasMap = $grouped->map(function($items, $key) use ($intervalMinutes, $parseLocalCarbon) {
+                $startCarbon = Carbon::createFromFormat('Y-m-d H:i', $key, 'America/Guayaquil');
                 $endCarbon = $startCarbon->copy()->addMinutes($intervalMinutes)->subSecond();
                 $label = $startCarbon->format('H:i:s') . ' - ' . $endCarbon->format('H:i:s');
 
                 $minItem = $items->sortBy('valor')->first();
                 $maxItem = $items->sortByDesc('valor')->first();
 
-                $minAt = $minItem ? Carbon::parse($minItem->created_at)->setTimezone('America/Guayaquil')->format('H:i:s') : null;
-                $maxAt = $maxItem ? Carbon::parse($maxItem->created_at)->setTimezone('America/Guayaquil')->format('H:i:s') : null;
+                $minAt = $minItem ? $parseLocalCarbon($minItem->created_at)->format('H:i:s') : null;
+                $maxAt = $maxItem ? $parseLocalCarbon($maxItem->created_at)->format('H:i:s') : null;
 
                 return [
                     'valor' => round($items->avg('valor'), 2),
@@ -296,6 +333,7 @@ class LecturaController extends Controller
                 'clave_mqtt' => $sub->clave_mqtt,
                 'nombre' => $sub->nombre,
                 'unidad' => $sub->unidad,
+                'icono' => $sub->icono,
                 'valor' => $latest ? $latest->valor : null,
                 'fecha' => $latest ? $latest->created_at->toIso8601String() : null
             ];
@@ -318,6 +356,14 @@ class LecturaController extends Controller
             return response()->json([]);
         }
 
+        // Si se solicita el buffer en vivo en tiempo real (reloj activo)
+        if ($request->boolean('live') || $request->input('live') == '1') {
+            $liveBuf = \Illuminate\Support\Facades\Cache::get('live_buffer_node_' . $request->serial_number, []);
+            if (!empty($liveBuf)) {
+                return response()->json($liveBuf);
+            }
+        }
+
         $limit = $request->input('limit', 50);
         $subvariables = $node->subvariables;
         
@@ -331,17 +377,25 @@ class LecturaController extends Controller
                 ->get();
 
             foreach ($lecturas as $l) {
-                $date = $l->created_at->copy()->setTimezone('America/Guayaquil');
+                $date = Carbon::parse($l->created_at)->setTimezone('America/Guayaquil');
                 $key = $date->format('Y-m-d H:i:s');
                 if (!isset($merged[$key])) {
-                    $timeFormatted = $date->format('g:i:s') . ($date->format('A') === 'AM' ? 'a.m.' : 'p.m.');
-                    $dateFormatted = $date->format('d/m/Y') . ', ' . $timeFormatted;
+                    $timeFormatted = $date->format('H:i:s');
+                    $dateFormatted = $date->format('d/m/Y, H:i:s');
                     
                     $merged[$key] = [
+                        'id'        => $l->id,
                         'timestamp' => $date->timestamp,
-                        'dateTime' => $dateFormatted,
-                        'shortTime' => $timeFormatted
+                        'dateTime'  => $dateFormatted,
+                        'shortTime' => $timeFormatted,
+                        'created_at' => $l->created_at
                     ];
+                } else {
+                    // Keep the highest id as row identifier for dedup
+                    if ($l->id > $merged[$key]['id']) {
+                        $merged[$key]['id'] = $l->id;
+                        $merged[$key]['created_at'] = $l->created_at;
+                    }
                 }
                 $merged[$key][$sub->clave_mqtt] = $l->valor;
             }
@@ -394,10 +448,12 @@ class LecturaController extends Controller
             'selections' => 'required|array',
             'selections.*.serial_number' => 'required|string',
             'selections.*.clave_mqtt' => 'required|string',
+            'fecha' => 'nullable|string',
         ]);
 
-        $limit = 30; // Mostrar los últimos 30 ticks en la gráfica
+        $limit = 50; // Mostrar lecturas en la gráfica
         $merged = [];
+        $fecha = $request->input('fecha');
 
         foreach ($request->selections as $sel) {
             $node = Node::where('serial_number', $sel['serial_number'])->first();
@@ -406,9 +462,14 @@ class LecturaController extends Controller
             $sub = $node->subvariables()->where('clave_mqtt', $sel['clave_mqtt'])->first();
             if (!$sub) continue;
 
-            $lecturas = Lectura::where('node_id', $node->id)
-                ->where('subvariable_id', $sub->id)
-                ->orderBy('created_at', 'desc')
+            $query = Lectura::where('node_id', $node->id)
+                ->where('subvariable_id', $sub->id);
+
+            if ($fecha) {
+                $query->whereDate('created_at', $fecha);
+            }
+
+            $lecturas = $query->orderBy('created_at', 'desc')
                 ->limit($limit)
                 ->get();
 
@@ -416,7 +477,7 @@ class LecturaController extends Controller
             $dataKey = $sel['serial_number'] . '_' . $sel['clave_mqtt'];
 
             foreach($lecturas as $l) {
-                $date = $l->created_at->copy()->setTimezone('America/Guayaquil');
+                $date = Carbon::parse($l->created_at)->setTimezone('America/Guayaquil');
                 $timeKey = $date->format('Y-m-d H:i:s');
                 if(!isset($merged[$timeKey])) {
                     $merged[$timeKey] = [

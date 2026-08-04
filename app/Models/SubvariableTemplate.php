@@ -14,6 +14,7 @@ class SubvariableTemplate extends Model
     protected $fillable = [
         'metric_template_id',
         'nombre',
+        'nombre_en',
         'unidad',
         'clave_mqtt',
         'min_expected',

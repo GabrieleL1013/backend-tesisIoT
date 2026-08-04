@@ -120,6 +120,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/node-alerts/{id}', [NodeAlertController::class, 'destroy']);
 
     // Consulta básica de Usuarios, Roles e Interfaces por parte de personal autenticado
+    Route::get('/users/count', [UserController::class, 'count']);
     Route::get('/users', [UserController::class, 'index']);
     Route::get('/users/{id}', [UserController::class, 'show']);
 

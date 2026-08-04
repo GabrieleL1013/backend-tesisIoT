@@ -22,10 +22,8 @@ class VirtualNode(threading.Thread):
         self.broker = node_data.get('broker') or 'broker.hivemq.com'
         self.port = int(node_data.get('port') or 1883)
         
-        # Topic predeterminado si no tiene configurado
-        self.topic_data = node_data.get('topic_data')
-        if not self.topic_data:
-            self.topic_data = f"iot_uleam/{node_data.get('location_slug', 'general')}"
+        loc_slug = node_data.get('location_slug') if (node_data.get('location_slug') and isinstance(node_data.get('location_slug'), str)) else (node_data.get('serial_number') or 'general')
+        self.topic_data = node_data.get('topic_data') or f"iot_uleam/{loc_slug}"
             
         self.use_v5 = bool(node_data.get('use_mqtt_v5', False))
         self.username = node_data.get('username')
@@ -179,13 +177,22 @@ class SimulatorManager:
         nodes = self.fetch_simulated_nodes()
         current_node_ids = {str(n['id']): n for n in nodes}
         
-        # 1. Iniciar nuevos simuladores
+        # 1. Iniciar nuevos simuladores o ACTUALIZAR los existentes si cambió su configuración/variables
         for node_id, node_data in current_node_ids.items():
             if node_id not in self.active_simulators:
                 print(f"➕ Detectado nuevo nodo simulado: {node_data['nombre']}")
                 sim = VirtualNode(node_data)
                 self.active_simulators[node_id] = sim
                 sim.start()
+            else:
+                # Comprobar si cambiaron las lecturas o la configuración del nodo
+                existing_sim = self.active_simulators[node_id]
+                if existing_sim.node_data != node_data:
+                    print(f"✏️ Cambios detectados en nodo simulado: {node_data['nombre']}. Reiniciando con las nuevas variables...")
+                    existing_sim.stop()
+                    new_sim = VirtualNode(node_data)
+                    self.active_simulators[node_id] = new_sim
+                    new_sim.start()
                 
         # 2. Detener simuladores que fueron eliminados o desactivados
         ids_to_remove = []

@@ -11,7 +11,11 @@ class AppInterface extends Model
 
     protected $fillable = [
         'name',
+        'name_es',
+        'name_en',
         'path',
+        'path_es',
+        'path_en',
         'description',
         'allowed_roles',
         'min_level',
@@ -20,4 +24,9 @@ class AppInterface extends Model
     protected $casts = [
         'allowed_roles' => 'array',
     ];
+
+    public function texts()
+    {
+        return $this->hasMany(InterfaceText::class, 'interface_id');
+    }
 }

@@ -12,6 +12,7 @@ class Node extends Model
 
     protected $fillable = [
         'nombre',
+        'nombre_en',
         'serial_number',
         'categoria',
         'location_id',

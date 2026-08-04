@@ -12,7 +12,12 @@ class AppInterfaceController extends Controller
      */
     public function index()
     {
-        return response()->json(AppInterface::all(), 200);
+        $interfaces = AppInterface::where('path', 'like', '%/admin%')
+            ->orWhere('path', '/modo-edicion')
+            ->orWhere('path', '/edit-mode')
+            ->get();
+
+        return response()->json($interfaces, 200);
     }
 
     /**

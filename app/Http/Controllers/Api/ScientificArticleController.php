@@ -4,18 +4,54 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\ScientificArticle;
+use App\Services\TranslationService;
 use Illuminate\Http\Request;
 
 class ScientificArticleController extends Controller
 {
-    public function index()
+    private function localizeArticle(ScientificArticle $article, string $lang): array
     {
-        return response()->json(ScientificArticle::all(), 200);
+        $data = $article->toArray();
+        if (str_starts_with(strtolower($lang), 'en')) {
+            $transFields = [
+                'titulo', 'resumen', 'palabras_clave', 'introduccion',
+                'introduccion_imagen_descripcion', 'metodologia',
+                'metodologia_imagen_descripcion', 'resultados',
+                'resultados_imagen_descripcion', 'conclusiones',
+                'conclusiones_imagen_descripcion'
+            ];
+
+            foreach ($transFields as $field) {
+                $fieldEn = $field . '_en';
+                if (empty($article->$fieldEn) && !empty($article->$field)) {
+                    $trans = TranslationService::translate($article->$field, 'es', 'en');
+                    $article->$fieldEn = !empty($trans) ? $trans : $article->$field;
+                }
+                if (!empty($article->$fieldEn)) {
+                    $data[$field] = $article->$fieldEn;
+                }
+            }
+
+            if ($article->isDirty()) {
+                $article->save();
+            }
+        }
+        return $data;
+    }
+
+    public function index(Request $request)
+    {
+        $lang = $request->query('lang', $request->header('Accept-Language', 'es'));
+        $articles = ScientificArticle::all()->map(function ($article) use ($lang) {
+            return $this->localizeArticle($article, $lang);
+        });
+
+        return response()->json($articles, 200);
     }
 
     public function store(Request $request)
     {
-        $request->validate([
+        $validated = $request->validate([
             'titulo' => 'required|string',
             'autores' => 'required|string',
             'revista' => 'nullable|string',
@@ -39,20 +75,45 @@ class ScientificArticleController extends Controller
             'tipo_registro' => 'nullable|string'
         ]);
 
-        $article = ScientificArticle::create($request->all());
+        $lang = strtolower($request->query('lang', $request->header('Accept-Language', 'es')));
+        $isEn = str_starts_with($lang, 'en');
 
-        return response()->json($article, 201);
+        $transFields = [
+            'titulo', 'resumen', 'palabras_clave', 'introduccion',
+            'introduccion_imagen_descripcion', 'metodologia',
+            'metodologia_imagen_descripcion', 'resultados',
+            'resultados_imagen_descripcion', 'conclusiones',
+            'conclusiones_imagen_descripcion'
+        ];
+
+        foreach ($transFields as $field) {
+            if (!empty($validated[$field])) {
+                if ($isEn) {
+                    $validated[$field . '_en'] = $validated[$field];
+                    $translatedEs = TranslationService::translate($validated[$field], 'en', 'es');
+                    $validated[$field] = !empty($translatedEs) ? $translatedEs : $validated[$field];
+                } else {
+                    $translatedEn = TranslationService::translate($validated[$field], 'es', 'en');
+                    $validated[$field . '_en'] = !empty($translatedEn) ? $translatedEn : $validated[$field];
+                }
+            }
+        }
+
+        $article = ScientificArticle::create($validated);
+
+        return response()->json($this->localizeArticle($article, $lang), 201);
     }
 
-    public function show($id)
+    public function show(Request $request, $id)
     {
         $article = ScientificArticle::findOrFail($id);
-        return response()->json($article, 200);
+        $lang = $request->query('lang', $request->header('Accept-Language', 'es'));
+        return response()->json($this->localizeArticle($article, $lang), 200);
     }
 
     public function update(Request $request, $id)
     {
-        $request->validate([
+        $validated = $request->validate([
             'titulo' => 'required|string',
             'autores' => 'required|string',
             'revista' => 'nullable|string',
@@ -76,10 +137,34 @@ class ScientificArticleController extends Controller
             'tipo_registro' => 'nullable|string'
         ]);
 
-        $article = ScientificArticle::findOrFail($id);
-        $article->update($request->all());
+        $lang = strtolower($request->query('lang', $request->header('Accept-Language', 'es')));
+        $isEn = str_starts_with($lang, 'en');
 
-        return response()->json($article, 200);
+        $transFields = [
+            'titulo', 'resumen', 'palabras_clave', 'introduccion',
+            'introduccion_imagen_descripcion', 'metodologia',
+            'metodologia_imagen_descripcion', 'resultados',
+            'resultados_imagen_descripcion', 'conclusiones',
+            'conclusiones_imagen_descripcion'
+        ];
+
+        foreach ($transFields as $field) {
+            if (!empty($validated[$field])) {
+                if ($isEn) {
+                    $validated[$field . '_en'] = $validated[$field];
+                    $translatedEs = TranslationService::translate($validated[$field], 'en', 'es');
+                    $validated[$field] = !empty($translatedEs) ? $translatedEs : $validated[$field];
+                } else {
+                    $translatedEn = TranslationService::translate($validated[$field], 'es', 'en');
+                    $validated[$field . '_en'] = !empty($translatedEn) ? $translatedEn : $validated[$field];
+                }
+            }
+        }
+
+        $article = ScientificArticle::findOrFail($id);
+        $article->update($validated);
+
+        return response()->json($this->localizeArticle($article, $lang), 200);
     }
 
     public function destroy($id)

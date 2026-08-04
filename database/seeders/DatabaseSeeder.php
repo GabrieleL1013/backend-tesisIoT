@@ -17,12 +17,21 @@ class DatabaseSeeder extends Seeder
     {
         // User::factory(10)->create();
 
+        $role = \App\Models\Role::firstOrCreate(
+            ['name' => 'Superusuario'],
+            [
+                'description' => 'Rol principal con acceso total al sistema',
+                'color' => '#10b981',
+                'level_permission' => 10,
+            ]
+        );
+
         User::updateOrCreate(
             ['email' => 'admin@uleam.edu.ec'],
             [
                 'name' => 'Daniel Cedeño',
                 'password' => bcrypt('uleamiot2026'),
-                'rol' => 'Superusuario'
+                'role_id' => $role->id,
             ]
         );
 
@@ -33,6 +42,7 @@ class DatabaseSeeder extends Seeder
             CategorySeeder::class,
             NewsArticleSeeder::class,
             ScientificArticleSeeder::class,
+            InterfaceTextSeeder::class,
         ]);
     }
 }

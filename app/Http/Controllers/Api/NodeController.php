@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Node;
 use App\Models\SubvariableTemplate;
+use App\Models\Category;
+use App\Services\TranslationService;
 use Illuminate\Http\Request;
 
 class NodeController extends Controller
@@ -18,21 +20,59 @@ class NodeController extends Controller
         return in_array($clientIp, ['127.0.0.1', '::1', 'localhost']);
     }
 
+    private function processBilingualNode(array $data, string $lang): array
+    {
+        $isEn = str_starts_with(strtolower($lang), 'en');
+
+        if (isset($data['nombre'])) {
+            if ($isEn) {
+                $data['nombre_en'] = $data['nombre'];
+                $trans = TranslationService::translate($data['nombre'], 'en', 'es');
+                $data['nombre'] = !empty($trans) ? $trans : $data['nombre'];
+            } else {
+                $trans = TranslationService::translate($data['nombre'], 'es', 'en');
+                $data['nombre_en'] = !empty($trans) ? $trans : $data['nombre'];
+            }
+        }
+
+        return $data;
+    }
+
     public function index(Request $request)
     {
-        $showCreds = auth('sanctum')->check();
+        $lang = strtolower($request->query('lang', $request->header('Accept-Language', 'es')));
+        $isEn = str_starts_with($lang, 'en');
+        $showCreds = $request->boolean('include_credentials') && auth('sanctum')->check();
+
+        $categories = Category::all();
 
         $nodes = Node::with(['subvariables.metricTemplate', 'location', 'lecturas' => function($q) {
             $q->latest('created_at')->limit(1);
         }])->get();
 
-        $mapped = $nodes->map(function ($node) use ($showCreds) {
-            $lecturas = $node->subvariables->map(function ($sub) {
+        $mapped = $nodes->map(function ($node) use ($showCreds, $isEn, $categories) {
+            $nombreLocalized = $isEn ? (!empty($node->nombre_en) ? $node->nombre_en : $node->nombre) : $node->nombre;
+
+            $catEs = $node->categoria;
+            $catObj = $categories->first(fn($c) => $c->nombre === $catEs || $c->nombre_en === $catEs);
+            $catEn = $catObj ? ($catObj->nombre_en ?? TranslationService::translate($catEs, 'es', 'en')) : (TranslationService::translate($catEs, 'es', 'en') ?? $catEs);
+            $categoriaLocalized = $isEn ? (!empty($catEn) ? $catEn : $catEs) : $catEs;
+
+            $locEs = $node->location->nombre ?? 'Campus Uleam Manta';
+            $locEn = $node->location->nombre_en ?? ($isEn ? (TranslationService::translate($locEs, 'es', 'en') ?? $locEs) : $locEs);
+            $ubicacionLocalized = $isEn ? (!empty($locEn) ? $locEn : $locEs) : $locEs;
+
+            $lecturas = $node->subvariables->map(function ($sub) use ($isEn) {
+                $tipoEs = $sub->nombre;
+                $tipoEn = $sub->nombre_en ?? ($isEn ? (TranslationService::translate($tipoEs, 'es', 'en') ?? $tipoEs) : $tipoEs);
                 return [
-                    'sensor' => $sub->metricTemplate->nombre ?? 'Sensor Integrado',
+                    'sensor' => $sub->metricTemplate ? ($isEn ? ($sub->metricTemplate->nombre_en ?? $sub->metricTemplate->nombre) : $sub->metricTemplate->nombre) : 'Sensor Integrado',
                     'data_type' => $sub->clave_mqtt,
-                    'tipo' => $sub->nombre,
+                    'tipo' => $isEn ? (!empty($tipoEn) ? $tipoEn : $tipoEs) : $tipoEs,
+                    'tipo_es' => $tipoEs,
+                    'tipo_en' => $tipoEn,
                     'unidad' => $sub->unidad,
+                    'icono' => $sub->icono,
                     'minExpected' => $sub->min_expected,
                     'maxExpected' => $sub->max_expected
                 ];
@@ -46,13 +86,19 @@ class NodeController extends Controller
 
             return [
                 'id' => (string)$node->id,
-                'nombre' => $node->nombre,
+                'nombre' => $nombreLocalized,
+                'nombre_es' => $node->nombre,
+                'nombre_en' => $node->nombre_en ?? $node->nombre,
                 'serial_number' => $node->serial_number,
                 'ubicacion_id' => (string)$node->location_id,
-                'ubicacion_nombre' => $node->location->nombre ?? 'Campus Uleam Manta',
+                'ubicacion_nombre' => $ubicacionLocalized,
+                'ubicacion_nombre_es' => $locEs,
+                'ubicacion_nombre_en' => $locEn,
                 'latitud' => $node->location->latitud ?? '-0.951389',
                 'longitud' => $node->location->longitud ?? '-80.702476',
-                'categoria' => $node->categoria,
+                'categoria' => $categoriaLocalized,
+                'categoria_es' => $catEs,
+                'categoria_en' => $catEn,
                 'lecturas' => $lecturas,
                 'estado' => $node->estado,
                 'is_online' => $isOnline,
@@ -73,9 +119,6 @@ class NodeController extends Controller
         return response()->json($mapped);
     }
 
-    /**
-     * Endpoint interno reservado para los listeners y simuladores locales de Python (MQTT_LISTENER y SIMULATOR_MANAGER).
-     */
     public function internalIndex(Request $request)
     {
         $clientIp = $request->ip();
@@ -100,6 +143,7 @@ class NodeController extends Controller
                     'data_type' => $sub->clave_mqtt,
                     'tipo' => $sub->nombre,
                     'unidad' => $sub->unidad,
+                    'icono' => $sub->icono,
                     'minExpected' => $sub->min_expected,
                     'maxExpected' => $sub->max_expected
                 ];
@@ -161,7 +205,9 @@ class NodeController extends Controller
             'instability_alert_interval' => 'nullable|integer|min:30'
         ]);
 
-        $node = Node::create([
+        $lang = strtolower($request->query('lang', $request->header('Accept-Language', 'es')));
+        
+        $nodeData = [
             'nombre' => $request->nombre,
             'serial_number' => $request->serial_number,
             'categoria' => $request->categoria,
@@ -178,7 +224,11 @@ class NodeController extends Controller
             'is_simulated' => $request->is_simulated ?? false,
             'save_frequency' => $request->save_frequency ?? 30,
             'instability_alert_interval' => $request->instability_alert_interval ?? 300
-        ]);
+        ];
+
+        $nodeData = $this->processBilingualNode($nodeData, $lang);
+
+        $node = Node::create($nodeData);
 
         if (!empty($request->lecturas)) {
             $subvariableIds = [];
@@ -195,39 +245,28 @@ class NodeController extends Controller
             $node->subvariables()->sync($subvariableIds);
         }
 
-        return response()->json([
-            'id' => (string)$node->id,
-            'nombre' => $node->nombre,
-            'serial_number' => $node->serial_number,
-            'ubicacion_id' => (string)$node->location_id,
-            'categoria' => $node->categoria,
-            'lecturas' => $request->lecturas ?? [],
-            'estado' => $node->estado,
-            'broker' => $node->broker,
-            'port' => $node->port,
-            'topic_data' => $node->topic_data,
-            'client_id' => $node->client_id,
-            'username' => $node->username,
-            'password' => $node->password,
-            'location_slug' => $node->location_slug,
-            'use_mqtt_v5' => $node->use_mqtt_v5,
-            'is_simulated' => $node->is_simulated,
-            'save_frequency' => $node->save_frequency,
-            'instability_alert_interval' => $node->instability_alert_interval
-        ], 201);
+        return response()->json($node, 201);
     }
 
     public function show(Request $request, $id)
     {
         $showCreds = $this->canSeeCredentials($request);
+        $lang = strtolower($request->query('lang', $request->header('Accept-Language', 'es')));
+        $isEn = str_starts_with($lang, 'en');
+
         $node = Node::with(['subvariables.metricTemplate', 'location'])->findOrFail($id);
         
-        $lecturas = $node->subvariables->map(function ($sub) {
+        $lecturas = $node->subvariables->map(function ($sub) use ($isEn) {
+            $tipoEs = $sub->nombre;
+            $tipoEn = $sub->nombre_en ?? ($isEn ? (\App\Services\TranslationService::translate($tipoEs, 'es', 'en') ?? $tipoEs) : $tipoEs);
             return [
-                'sensor' => $sub->metricTemplate->nombre ?? 'Sensor Integrado',
+                'sensor' => $sub->metricTemplate ? $sub->metricTemplate->nombre : 'Sensor Integrado',
                 'data_type' => $sub->clave_mqtt,
-                'tipo' => $sub->nombre,
+                'tipo' => $isEn ? (!empty($tipoEn) ? $tipoEn : $tipoEs) : $tipoEs,
+                'tipo_es' => $tipoEs,
+                'tipo_en' => $tipoEn,
                 'unidad' => $sub->unidad,
+                'icono' => $sub->icono,
                 'minExpected' => $sub->min_expected,
                 'maxExpected' => $sub->max_expected
             ];
@@ -236,17 +275,20 @@ class NodeController extends Controller
         return response()->json([
             'id' => (string)$node->id,
             'nombre' => $node->nombre,
+            'nombre_es' => $node->nombre,
+            'nombre_en' => $node->nombre_en ?? $node->nombre,
             'serial_number' => $node->serial_number,
             'ubicacion_id' => (string)$node->location_id,
             'ubicacion_nombre' => $node->location->nombre ?? 'Campus Uleam Manta',
             'latitud' => $node->location->latitud ?? '-0.951389',
             'longitud' => $node->location->longitud ?? '-80.702476',
             'categoria' => $node->categoria,
+            'categoria_es' => $node->categoria,
             'lecturas' => $lecturas,
             'estado' => $node->estado,
             'broker' => $showCreds ? $node->broker : null,
             'port' => $showCreds ? $node->port : null,
-            'topic_data' => $node->topic_data,
+            'topic_data' => $showCreds ? $node->topic_data : null,
             'client_id' => $showCreds ? $node->client_id : null,
             'username' => $showCreds ? $node->username : null,
             'password' => $showCreds ? $node->password : null,
@@ -280,7 +322,9 @@ class NodeController extends Controller
         ]);
 
         $node = Node::findOrFail($id);
-        $node->update([
+        $lang = strtolower($request->query('lang', $request->header('Accept-Language', 'es')));
+
+        $nodeData = [
             'nombre' => $request->nombre,
             'serial_number' => $request->serial_number,
             'categoria' => $request->categoria,
@@ -296,7 +340,11 @@ class NodeController extends Controller
             'is_simulated' => $request->is_simulated ?? false,
             'save_frequency' => $request->save_frequency ?? 30,
             'instability_alert_interval' => $request->instability_alert_interval ?? 300
-        ]);
+        ];
+
+        $nodeData = $this->processBilingualNode($nodeData, $lang);
+
+        $node->update($nodeData);
 
         if (!empty($request->lecturas)) {
             $subvariableIds = [];
@@ -315,26 +363,7 @@ class NodeController extends Controller
             $node->subvariables()->detach();
         }
 
-        return response()->json([
-            'id' => (string)$node->id,
-            'nombre' => $node->nombre,
-            'serial_number' => $node->serial_number,
-            'ubicacion_id' => (string)$node->location_id,
-            'categoria' => $node->categoria,
-            'lecturas' => $request->lecturas ?? [],
-            'estado' => $node->estado,
-            'broker' => $node->broker,
-            'port' => $node->port,
-            'topic_data' => $node->topic_data,
-            'client_id' => $node->client_id,
-            'username' => $node->username,
-            'password' => $node->password,
-            'location_slug' => $node->location_slug,
-            'use_mqtt_v5' => $node->use_mqtt_v5,
-            'is_simulated' => $node->is_simulated,
-            'save_frequency' => $node->save_frequency,
-            'instability_alert_interval' => $node->instability_alert_interval
-        ]);
+        return response()->json($node);
     }
 
     public function destroy($id)

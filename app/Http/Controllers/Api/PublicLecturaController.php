@@ -60,8 +60,8 @@ class PublicLecturaController extends Controller
             $startDate = $maxLimitDate;
         }
 
-        $startUtc = $startDate->copy()->setTimezone('UTC');
-        $endUtc = $now->copy()->setTimezone('UTC');
+        $startUtc = $startDate->copy();
+        $endUtc = $now->copy();
 
         // Intervalo de agrupación en minutos (por defecto 60 min)
         $intervalMinutes = (int) $request->input('intervalo', 60);
@@ -105,37 +105,107 @@ class PublicLecturaController extends Controller
                 'icono' => $sub->icono,
                 'promedio' => ($globalStats && $globalStats->total > 0 && $globalStats->promedio !== null) ? round((float)$globalStats->promedio, 1) : null,
                 'min' => $minRecord ? round((float)$minRecord->valor, 1) : null,
-                'min_fecha' => $minRecord ? $minRecord->created_at->copy()->setTimezone('America/Guayaquil')->format('d/m/Y, h:i:s a') : '--',
+                'min_fecha' => $minRecord ? Carbon::parse($minRecord->created_at)->setTimezone('America/Guayaquil')->format('d/m/Y H:i:s') : '--',
                 'max' => $maxRecord ? round((float)$maxRecord->valor, 1) : null,
-                'max_fecha' => $maxRecord ? $maxRecord->created_at->copy()->setTimezone('America/Guayaquil')->format('d/m/Y, h:i:s a') : '--',
+                'max_fecha' => $maxRecord ? Carbon::parse($maxRecord->created_at)->setTimezone('America/Guayaquil')->format('d/m/Y H:i:s') : '--',
                 'total' => $globalStats ? (int)$globalStats->total : 0
             ];
 
-            // 2. Consulta agrupada en bloques de $intervalMinutes usando PostgreSQL
+            // 2. Consulta agrupada en bloques de $intervalMinutes usando hora local de Ecuador (America/Guayaquil)
             $rows = Lectura::where('node_id', $node->id)
                 ->where('subvariable_id', $sub->id)
                 ->whereBetween('created_at', [$startUtc, $endUtc])
-                ->selectRaw("
-                    to_timestamp(floor((extract('epoch' from created_at) - 18000) / ?) * ? + 18000) AT TIME ZONE 'UTC' as fecha_agrupada, 
-                    AVG(valor) as valor_promedio,
-                    MAX(valor) as valor_max,
-                    MIN(valor) as valor_min
-                ", [$seconds, $seconds])
-                ->groupBy('fecha_agrupada')
-                ->orderBy('fecha_agrupada', 'asc')
+                ->orderBy('created_at', 'asc')
                 ->get();
 
-            $seriesResult[$clave] = $rows->map(function ($row) use ($intervalMinutes) {
-                $date = Carbon::parse($row->fecha_agrupada)->setTimezone('America/Guayaquil');
-                $label = $intervalMinutes >= 1440 ? $date->format('d/m/Y') : $date->format('d/m/Y H:i');
-                return [
-                    'valor' => round((float)$row->valor_promedio, 1),
-                    'min' => round((float)$row->valor_min, 1),
-                    'max' => round((float)$row->valor_max, 1),
-                    'fecha' => $date->toIso8601String(),
-                    'label' => $label
-                ];
-            })->toArray();
+            $buckets = [];
+            foreach ($rows as $l) {
+                $dt = Carbon::parse($l->created_at)->setTimezone('America/Guayaquil');
+                $timestamp = $dt->timestamp;
+
+                if ($intervalMinutes >= 1440) {
+                    $bucketTimestamp = $dt->copy()->startOfDay()->timestamp;
+                } else {
+                    $dayStart = $dt->copy()->startOfDay()->timestamp;
+                    $secondsFromDayStart = $timestamp - $dayStart;
+                    $bucketSeconds = floor($secondsFromDayStart / $seconds) * $seconds;
+                    $bucketTimestamp = $dayStart + $bucketSeconds;
+                }
+
+                if (!isset($buckets[$bucketTimestamp])) {
+                    $buckets[$bucketTimestamp] = ['vals' => []];
+                }
+                $buckets[$bucketTimestamp]['vals'][] = floatval($l->valor);
+            }
+
+            $series = [];
+            if ($intervalMinutes >= 1440) {
+                // Generar exactamente 30 puntos diarios (ventana continua de 30 días hasta hoy en hora de Ecuador)
+                $nowDay = Carbon::now('America/Guayaquil')->startOfDay();
+                $startDay = $nowDay->copy()->subDays(29);
+
+                for ($d = $startDay->copy(); $d->lte($nowDay); $d->addDay()) {
+                    $ts = $d->timestamp;
+                    $label = $d->format('d/m/Y');
+                    $startStr = $d->copy()->startOfDay()->format('d/m/Y 00:00:00');
+                    $endStr = $d->copy()->endOfDay()->format('d/m/Y 23:59:59');
+
+                    if (isset($buckets[$ts]) && count($buckets[$ts]['vals']) > 0) {
+                        $vals = $buckets[$ts]['vals'];
+                        $avg = array_sum($vals) / count($vals);
+                        $minVal = min($vals);
+                        $maxVal = max($vals);
+                        $series[] = [
+                            'valor' => round($avg, 1),
+                            'min' => round($minVal, 1),
+                            'max' => round($maxVal, 1),
+                            'fecha' => $d->toIso8601String(),
+                            'label' => $label,
+                            'inicio_intervalo' => $startStr,
+                            'fin_intervalo' => $endStr,
+                            'has_data' => true
+                        ];
+                    } else {
+                        // Día sin lecturas registradas: marcar sin datos
+                        $series[] = [
+                            'valor' => null,
+                            'min' => null,
+                            'max' => null,
+                            'fecha' => $d->toIso8601String(),
+                            'label' => $label,
+                            'inicio_intervalo' => $startStr,
+                            'fin_intervalo' => $endStr,
+                            'has_data' => false
+                        ];
+                    }
+                }
+            } else {
+                // Para agrupaciones intradía (1h, 5h, 12h) utilizadas en exportaciones CSV
+                ksort($buckets);
+                foreach ($buckets as $ts => $bData) {
+                    if (count($bData['vals']) > 0) {
+                        $bDate = Carbon::createFromTimestamp($ts, 'America/Guayaquil');
+                        $bDateEnd = $bDate->copy()->addMinutes($intervalMinutes)->subSecond();
+                        $label = $bDate->format('d/m/Y H:i');
+                        $vals = $bData['vals'];
+                        $avg = array_sum($vals) / count($vals);
+                        $minVal = min($vals);
+                        $maxVal = max($vals);
+                        $series[] = [
+                            'valor' => round($avg, 1),
+                            'min' => round($minVal, 1),
+                            'max' => round($maxVal, 1),
+                            'fecha' => $bDate->toIso8601String(),
+                            'label' => $label,
+                            'inicio_intervalo' => $bDate->format('d/m/Y H:i:s'),
+                            'fin_intervalo' => $bDateEnd->format('d/m/Y H:i:s'),
+                            'has_data' => true
+                        ];
+                    }
+                }
+            }
+
+            $seriesResult[$clave] = $series;
         }
 
         return response()->json([
