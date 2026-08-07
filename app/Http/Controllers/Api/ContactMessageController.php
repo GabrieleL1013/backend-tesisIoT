@@ -56,6 +56,27 @@ class ContactMessageController extends Controller
     }
 
     /**
+     * Mark all contact messages as read.
+     */
+    public function markAllRead()
+    {
+        ContactMessage::where('leido', false)->update(['leido' => true]);
+        return response()->json(['message' => 'Todos los mensajes de contacto marcados como leídos.'], 200);
+    }
+
+    /**
+     * Remove multiple contact messages from storage.
+     */
+    public function destroyBatch(Request $request)
+    {
+        $ids = $request->input('ids', []);
+        if (is_array($ids) && count($ids) > 0) {
+            ContactMessage::whereIn('id', $ids)->delete();
+        }
+        return response()->json(['message' => 'Mensajes de contacto eliminados con éxito.'], 200);
+    }
+
+    /**
      * Remove the specified contact message from storage.
      */
     public function destroy($id)

@@ -21,8 +21,20 @@ class InterfaceTextController extends Controller
 
         $clean = strtok(rtrim($path, '/'), '?') ?: '/';
 
-        return AppInterface::where('path_es', $clean)
+        $iface = AppInterface::where('path_es', $clean)
             ->orWhere('path_en', $clean)
+            ->orWhere('path', $clean)
+            ->first();
+
+        if ($iface) return $iface;
+
+        $stripped = preg_replace('#^/(es|en)(/.*)?$#i', '$2', $clean) ?: '/';
+
+        return AppInterface::where('path_es', $stripped)
+            ->orWhere('path_en', $stripped)
+            ->orWhere('path', $stripped)
+            ->orWhere('path_es', '/es' . $stripped)
+            ->orWhere('path_en', '/en' . $stripped)
             ->first();
     }
 
@@ -38,20 +50,28 @@ class InterfaceTextController extends Controller
         $interfaceIdFilter = $request->query('interface_id');
         $pathFilter = $request->query('path');
 
-        // Resolve interface_id from path if provided
+        $resolvedFromPath = false;
         if (!$interfaceIdFilter && $pathFilter) {
+            $resolvedFromPath = true;
             $iface = $this->resolveInterface($pathFilter);
             $interfaceIdFilter = $iface?->id;
         }
 
         $cacheKey = 'interface_texts_cache_' . ($isEn ? 'en' : 'es')
-            . ($interfaceIdFilter ? "_iface_{$interfaceIdFilter}" : '_all');
+            . ($interfaceIdFilter ? "_iface_{$interfaceIdFilter}" : ($resolvedFromPath ? "_path_" . md5($pathFilter) : '_all'));
 
-        $texts = Cache::remember($cacheKey, 3600, function () use ($isEn, $interfaceIdFilter) {
+        $texts = Cache::remember($cacheKey, 3600, function () use ($isEn, $interfaceIdFilter, $resolvedFromPath) {
             $query = InterfaceText::query();
 
             if ($interfaceIdFilter) {
-                $query->where('interface_id', $interfaceIdFilter);
+                // Devolver únicamente los textos asociados a esta interfaz + los textos globales (interface_id IS NULL)
+                $query->where(function($q) use ($interfaceIdFilter) {
+                    $q->where('interface_id', $interfaceIdFilter)
+                      ->orWhereNull('interface_id');
+                });
+            } else if ($resolvedFromPath) {
+                // Si se envió un parámetro ?path pero la ruta no está registrada en app_interfaces, retornar solo globales
+                $query->whereNull('interface_id');
             }
 
             $items = $query->get();
@@ -59,17 +79,9 @@ class InterfaceTextController extends Controller
 
             foreach ($items as $item) {
                 if ($isEn) {
-                    // Auto-translate if text_en is missing or equal to Spanish text
-                    if ((empty($item->text_en) || $item->text_en === $item->text) && !empty($item->text)) {
-                        $translated = TranslationService::translate($item->text, 'es', 'en');
-                        if ($translated && $translated !== $item->text) {
-                            $item->text_en = $translated;
-                            $item->save();
-                        }
-                    }
                     $result[$item->key] = !empty($item->text_en) ? $item->text_en : $item->text;
                 } else {
-                    $result[$item->key] = $item->text;
+                    $result[$item->key] = !empty($item->text) ? $item->text : $item->text_en;
                 }
             }
 
@@ -80,23 +92,27 @@ class InterfaceTextController extends Controller
     }
 
     /**
-     * Store or update an interface text with bidirectional auto-translation.
+     * Store or update an interface text with optional auto-translation.
      *
      * Rules:
-     * - Editing in ES → text = what user typed, text_en = translated to EN.
-     *   If translation fails or returns same word (unknown word), text_en = what user typed.
-     * - Editing in EN → text_en = what user typed, text = translated to ES.
-     *   If translation fails or returns same word (unknown word), text = what user typed.
+     * - auto_translate = true:
+     *   - Editing in ES -> text = user input, text_en = translated to EN.
+     *   - Editing in EN -> text_en = user input, text = translated to ES.
+     * - auto_translate = false:
+     *   - Editing in ES -> update ONLY text (text_en remains untouched).
+     *   - Editing in EN -> update ONLY text_en (text remains untouched).
      */
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'key'          => 'required|string|max:255',
-            'text'         => 'required|string',
-            'interface_id' => 'nullable|integer|exists:app_interfaces,id',
-            'path'         => 'nullable|string',
+            'key'            => 'required|string|max:255',
+            'text'           => 'present|nullable|string',
+            'interface_id'   => 'nullable|integer|exists:app_interfaces,id',
+            'path'           => 'nullable|string',
+            'auto_translate' => 'nullable|boolean',
         ]);
 
+        $autoTranslate = $request->boolean('auto_translate', true);
         $lang = strtolower($request->query('lang', $request->header('Accept-Language', 'es')));
         $isEn = str_starts_with($lang, 'en');
 
@@ -110,29 +126,35 @@ class InterfaceTextController extends Controller
         $userText = trim($validated['text']);
         $updateData = ['interface_id' => $interfaceId];
 
-        if ($isEn) {
-            // User edited in English → text_en = exact user input
-            // Translate to Spanish → if fails or returns same, use user input as fallback
-            $translatedEs = TranslationService::translate($userText, 'en', 'es');
-
-            $updateData['text_en'] = $userText;
-            // Only use translation if it's non-empty and different from the source
-            $updateData['text'] = (!empty($translatedEs) && $translatedEs !== $userText)
-                ? $translatedEs
-                : $userText;
-
-            Log::info("InterfaceText [EN→ES] key={$validated['key']} text_en={$userText} text={$updateData['text']}");
+        if ($autoTranslate) {
+            if ($isEn) {
+                // User edited in English with auto-translate ON
+                $translatedEs = TranslationService::translate($userText, 'en', 'es');
+                $updateData['text_en'] = $userText;
+                $updateData['text'] = (!empty($translatedEs) && $translatedEs !== $userText)
+                    ? $translatedEs
+                    : $userText;
+                Log::info("InterfaceText [EN->ES Auto] key={$validated['key']} text_en={$userText} text={$updateData['text']}");
+            } else {
+                // User edited in Spanish with auto-translate ON
+                $translatedEn = TranslationService::translate($userText, 'es', 'en');
+                $updateData['text'] = $userText;
+                $updateData['text_en'] = (!empty($translatedEn) && $translatedEn !== $userText)
+                    ? $translatedEn
+                    : $userText;
+                Log::info("InterfaceText [ES->EN Auto] key={$validated['key']} text={$userText} text_en={$updateData['text_en']}");
+            }
         } else {
-            // User edited in Spanish → text = exact user input
-            // Translate to English → if fails or returns same, use user input as fallback
-            $translatedEn = TranslationService::translate($userText, 'es', 'en');
-
-            $updateData['text'] = $userText;
-            $updateData['text_en'] = (!empty($translatedEn) && $translatedEn !== $userText)
-                ? $translatedEn
-                : $userText;
-
-            Log::info("InterfaceText [ES→EN] key={$validated['key']} text={$userText} text_en={$updateData['text_en']}");
+            // Auto-translate OFF
+            if ($isEn) {
+                // User edited in English without auto-translate -> update ONLY text_en
+                $updateData['text_en'] = $userText;
+                Log::info("InterfaceText [EN Only] key={$validated['key']} text_en={$userText}");
+            } else {
+                // User edited in Spanish without auto-translate -> update ONLY text
+                $updateData['text'] = $userText;
+                Log::info("InterfaceText [ES Only] key={$validated['key']} text={$userText}");
+            }
         }
 
         $interfaceText = InterfaceText::updateOrCreate(
@@ -146,7 +168,7 @@ class InterfaceTextController extends Controller
         // Return the text in the active language
         $responseText = $isEn
             ? (!empty($interfaceText->text_en) ? $interfaceText->text_en : $interfaceText->text)
-            : $interfaceText->text;
+            : (!empty($interfaceText->text) ? $interfaceText->text : $interfaceText->text_en);
 
         return response()->json([
             'id'           => $interfaceText->id,

@@ -33,19 +33,23 @@ Route::post('/contactos', [ContactMessageController::class, 'store'])->middlewar
 
 // Lectura de contenidos públicos (noticias, artículos científicos, imágenes y textos editables)
 Route::get('/noticias', [NewsArticleController::class, 'index']);
+Route::get('/noticias/anios', [NewsArticleController::class, 'getYears']);
 Route::get('/noticias/{id}', [NewsArticleController::class, 'show']);
 
 Route::get('/articulos', [ScientificArticleController::class, 'index']);
+Route::get('/articulos/anios', [ScientificArticleController::class, 'getYears']);
 Route::get('/articulos/{id}', [ScientificArticleController::class, 'show']);
 
 Route::get('/interface-texts', [InterfaceTextController::class, 'index']);
 Route::get('/interface-images', [InterfaceImageController::class, 'index']);
 
 // Lectura pública de nodos, categorías, ubicaciones y plantillas de métricas para el mapa y portal
+Route::get('/nodos/count', [NodeController::class, 'count']);
 Route::get('/nodos', [NodeController::class, 'index']);
 Route::get('/nodos/internal', [NodeController::class, 'internalIndex']);
 Route::get('/nodos/{id}', [NodeController::class, 'show']);
 
+Route::get('/categorias/count', [CategoryController::class, 'count']);
 Route::get('/categorias', [CategoryController::class, 'index']);
 Route::get('/categorias/{id}', [CategoryController::class, 'show']);
 
@@ -77,7 +81,10 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Gestión de mensajes de contacto recibidos
     Route::get('/contactos', [ContactMessageController::class, 'index']);
+    Route::put('/contactos/mark-all-read', [ContactMessageController::class, 'markAllRead']);
+    Route::delete('/contactos/bulk-delete', [ContactMessageController::class, 'destroyBatch']);
     Route::get('/contactos/{id}', [ContactMessageController::class, 'show']);
+    Route::put('/contactos/{id}', [ContactMessageController::class, 'update']);
     Route::delete('/contactos/{id}', [ContactMessageController::class, 'destroy']);
 
     // Operaciones de escritura para Nodos, Categorías, Ubicaciones y Métricas
@@ -116,6 +123,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/node-alerts/unread-count', [NodeAlertController::class, 'unreadCount']);
     Route::get('/node-alerts/latest', [NodeAlertController::class, 'latest']);
     Route::put('/node-alerts/mark-all-read', [NodeAlertController::class, 'markAllRead']);
+    Route::delete('/node-alerts/bulk-delete', [NodeAlertController::class, 'destroyBatch']);
     Route::put('/node-alerts/{id}/read', [NodeAlertController::class, 'markRead']);
     Route::delete('/node-alerts/{id}', [NodeAlertController::class, 'destroy']);
 

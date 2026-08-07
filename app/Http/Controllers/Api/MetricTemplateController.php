@@ -27,6 +27,42 @@ class MetricTemplateController extends Controller
         }
     }
 
+    private function handleImageUpload(?string $base64Image): ?string
+    {
+        if (!$base64Image || !preg_match('/^data:image\/(\w+);base64,/', $base64Image, $type)) {
+            return $base64Image;
+        }
+
+        $data = substr($base64Image, strpos($base64Image, ',') + 1);
+        $data = base64_decode($data);
+
+        if ($data === false) {
+            return null;
+        }
+
+        $extension = 'webp';
+
+        $folder = public_path('uploads/metricas');
+        if (!file_exists($folder)) {
+            mkdir($folder, 0777, true);
+        }
+
+        $filename = 'sensor_' . time() . '_' . uniqid() . '.' . $extension;
+        $filePath = $folder . '/' . $filename;
+        file_put_contents($filePath, $data);
+
+        return '/uploads/metricas/' . $filename;
+    }
+
+    private function formatImageUrl(?string $path): ?string
+    {
+        if (!$path) return null;
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://') || str_starts_with($path, 'data:')) {
+            return $path;
+        }
+        return url($path);
+    }
+
     public function index(Request $request)
     {
         $lang = strtolower($request->query('lang', $request->header('Accept-Language', 'es')));
@@ -40,7 +76,7 @@ class MetricTemplateController extends Controller
                 'nombre' => $isEn ? ($template->nombre_en ?? $template->nombre) : $template->nombre,
                 'nombre_es' => $template->nombre,
                 'nombre_en' => $template->nombre_en ?? $template->nombre,
-                'imagen' => $template->imagen,
+                'imagen' => $this->formatImageUrl($template->imagen),
                 'subvariables' => $template->subvariables->map(function ($sub) use ($isEn) {
                     return [
                         'id' => $sub->id,
@@ -77,10 +113,12 @@ class MetricTemplateController extends Controller
         $lang = strtolower($request->query('lang', $request->header('Accept-Language', 'es')));
         $tplTrans = $this->translateString($request->nombre, $lang);
 
+        $imagePath = $this->handleImageUpload($request->imagen);
+
         $template = MetricTemplate::create([
             'nombre' => $tplTrans['es'],
             'nombre_en' => $tplTrans['en'],
-            'imagen' => $request->imagen
+            'imagen' => $imagePath
         ]);
 
         foreach ($request->subvariables as $sub) {
@@ -96,7 +134,23 @@ class MetricTemplateController extends Controller
             ]);
         }
 
-        return response()->json($template->load('subvariables'), 201);
+        $res = $template->load('subvariables')->toArray();
+        $res['imagen'] = $this->formatImageUrl($template->imagen);
+
+        return response()->json($res, 201);
+    }
+
+    private function deletePhysicalImage(?string $path): void
+    {
+        if (!$path) return;
+
+        $parsedPath = parse_url($path, PHP_URL_PATH);
+        if ($parsedPath && str_starts_with($parsedPath, '/uploads/metricas/')) {
+            $fullPath = public_path(ltrim($parsedPath, '/'));
+            if (file_exists($fullPath)) {
+                @unlink($fullPath);
+            }
+        }
     }
 
     public function update(Request $request, $id)
@@ -117,10 +171,17 @@ class MetricTemplateController extends Controller
         $tplTrans = $this->translateString($request->nombre, $lang);
 
         $template = MetricTemplate::findOrFail($id);
+        $oldImage = $template->imagen;
+        $imagePath = $this->handleImageUpload($request->imagen);
+
+        if ($oldImage && $oldImage !== $imagePath) {
+            $this->deletePhysicalImage($oldImage);
+        }
+
         $template->update([
             'nombre' => $tplTrans['es'],
             'nombre_en' => $tplTrans['en'],
-            'imagen' => $request->imagen
+            'imagen' => $imagePath
         ]);
 
         $incomingIds = [];
@@ -157,12 +218,18 @@ class MetricTemplateController extends Controller
             }
         }
 
-        return response()->json($template->load('subvariables'));
+        $res = $template->load('subvariables')->toArray();
+        $res['imagen'] = $this->formatImageUrl($template->imagen);
+
+        return response()->json($res);
     }
 
     public function destroy($id)
     {
         $template = MetricTemplate::findOrFail($id);
+        if ($template->imagen) {
+            $this->deletePhysicalImage($template->imagen);
+        }
         $template->delete();
 
         return response()->json(['message' => 'Template de paquete de sensores eliminado correctamente.']);

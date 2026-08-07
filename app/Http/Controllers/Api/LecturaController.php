@@ -79,6 +79,7 @@ class LecturaController extends Controller
         if (!empty($savedData)) {
             $savedData['timestamp'] = $payload['timestamp'] ?? time();
             $savedData['dateTime'] = $payload['dateTime'] ?? now()->toDateTimeString();
+            $savedData['is_saved'] = $shouldSave;
 
             // Guardar en buffer en vivo (memoria caché) para streaming inmediato independientemente de la BD
             $bufferKey = 'live_buffer_node_' . $node->serial_number;

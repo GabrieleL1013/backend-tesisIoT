@@ -26,6 +26,11 @@ class CategoryController extends Controller
         return $data;
     }
 
+    public function count()
+    {
+        return response()->json(['count' => Category::count()]);
+    }
+
     public function index(Request $request)
     {
         $lang = strtolower($request->query('lang', $request->header('Accept-Language', 'es')));

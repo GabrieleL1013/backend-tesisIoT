@@ -38,6 +38,11 @@ class NodeController extends Controller
         return $data;
     }
 
+    public function count()
+    {
+        return response()->json(['count' => Node::count()]);
+    }
+
     public function index(Request $request)
     {
         $lang = strtolower($request->query('lang', $request->header('Accept-Language', 'es')));
@@ -46,9 +51,36 @@ class NodeController extends Controller
 
         $categories = Category::all();
 
-        $nodes = Node::with(['subvariables.metricTemplate', 'location', 'lecturas' => function($q) {
+        $catQuery = $request->query('categoria');
+        $nodeIdQuery = $request->query('id');
+
+        $query = Node::with(['subvariables.metricTemplate', 'location', 'lecturas' => function($q) {
             $q->latest('created_at')->limit(1);
-        }])->get();
+        }]);
+
+        if (!empty($catQuery)) {
+            $catNorm = strtolower(trim($catQuery));
+            $catObj = $categories->first(function($c) use ($catNorm) {
+                return strtolower(trim($c->nombre ?? '')) === $catNorm ||
+                       strtolower(trim($c->nombre_en ?? '')) === $catNorm ||
+                       strtolower(trim($c->nombre_es ?? '')) === $catNorm;
+            });
+
+            $validCatNames = array_filter([
+                $catQuery,
+                $catObj ? $catObj->nombre : null,
+                $catObj ? $catObj->nombre_en : null,
+                $catObj ? $catObj->nombre_es : null,
+            ]);
+
+            $query->whereIn('categoria', array_unique($validCatNames));
+        }
+
+        if (!empty($nodeIdQuery)) {
+            $query->where('id', $nodeIdQuery);
+        }
+
+        $nodes = $query->get();
 
         $mapped = $nodes->map(function ($node) use ($showCreds, $isEn, $categories) {
             $nombreLocalized = $isEn ? (!empty($node->nombre_en) ? $node->nombre_en : $node->nombre) : $node->nombre;
@@ -81,7 +113,7 @@ class NodeController extends Controller
             $isOnline = false;
             if ($node->lecturas->isNotEmpty()) {
                 $lastReadingTime = \Carbon\Carbon::parse($node->lecturas->first()->created_at);
-                $isOnline = $lastReadingTime->diffInMinutes(now()) <= 5;
+                $isOnline = $lastReadingTime->diffInSeconds(now()) <= 60;
             }
 
             return [
@@ -99,9 +131,10 @@ class NodeController extends Controller
                 'categoria' => $categoriaLocalized,
                 'categoria_es' => $catEs,
                 'categoria_en' => $catEn,
-                'lecturas' => $lecturas,
-                'estado' => $node->estado,
+                'lecturas' => $lecturas->toArray(),
+                'estado' => (bool)$node->estado,
                 'is_online' => $isOnline,
+                'has_data' => $node->lecturas->isNotEmpty(),
                 'broker' => $showCreds ? $node->broker : null,
                 'port' => $showCreds ? $node->port : null,
                 'topic_data' => $showCreds ? $node->topic_data : null,
@@ -152,7 +185,7 @@ class NodeController extends Controller
             $isOnline = false;
             if ($node->lecturas->isNotEmpty()) {
                 $lastReadingTime = \Carbon\Carbon::parse($node->lecturas->first()->created_at);
-                $isOnline = $lastReadingTime->diffInMinutes(now()) <= 5;
+                $isOnline = $lastReadingTime->diffInSeconds(now()) <= 60;
             }
 
             return [

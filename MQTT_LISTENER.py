@@ -53,42 +53,43 @@ def get_rc_description(rc):
 def normalizar_payload(payload_bruto, serial_esperado):
     """
     Analiza un JSON entrante y lo estandariza al formato que espera Laravel.
-    Retorna un diccionario limpio o None si el formato es totalmente desconocido.
     """
     payload_limpio = {}
 
-    # 1. Detectar formato ChirpStack v4 (El hardware físico de la universidad)
+    # 1. Detectar formato ChirpStack v4
     if "deviceInfo" in payload_bruto and "object" in payload_bruto:
         dev_eui = payload_bruto["deviceInfo"].get("devEui")
-        
-        # Ignorar mayúsculas/minúsculas al comparar el serial
         if dev_eui and str(dev_eui).lower() != str(serial_esperado).lower():
-            return None # Es de otro sensor
+            return None 
             
         payload_limpio["Sensor"] = serial_esperado
-        
-        # Extraer los datos físicos reales (pH, oxígeno, turbidez)
-        datos = payload_bruto.get("object", {})
-            
-        # Fusionamos los datos limpios
-        payload_limpio.update(datos)
-        return payload_limpio
+        payload_limpio.update(payload_bruto.get("object", {}))
 
-    # 2. Detectar formato estricto (El de tu simulador de Zorin/Windows)
+    # 2. Detectar formato estricto
     elif "Sensor" in payload_bruto:
         if str(payload_bruto["Sensor"]).lower() != str(serial_esperado).lower():
             return None
-        return payload_bruto
+        payload_limpio = payload_bruto.copy()
 
-    # 3. Detectar formato genérico o descuidado
+    # 3. Detectar formato genérico
     elif "temperatura" in payload_bruto or "humedad" in payload_bruto:
         payload_limpio["Sensor"] = serial_esperado
         payload_limpio.update(payload_bruto)
-        return payload_limpio
 
-    # Si no encaja en nada conocido
-    return None
+    # Si no reconoció el formato, se descarta
+    if not payload_limpio:
+        return None
 
+    # ---------------------------------------------------------
+    # 4. FILTRO ANTI-NULL (LA SOLUCIÓN AL ERROR 500)
+    # ---------------------------------------------------------
+    payload_filtrado = {}
+    for clave, valor in payload_limpio.items():
+        # Solo conservamos la llave si su valor NO es nulo
+        if valor is not None:
+            payload_filtrado[clave] = valor
+
+    return payload_filtrado
 
 class NodeListener(threading.Thread):
     def __init__(self, node_data):

@@ -97,6 +97,18 @@ class NodeAlertController extends Controller
     }
 
     /**
+     * Eliminar múltiples alertas.
+     */
+    public function destroyBatch(Request $request)
+    {
+        $ids = $request->input('ids', []);
+        if (is_array($ids) && count($ids) > 0) {
+            NodeAlert::whereIn('id', $ids)->delete();
+        }
+        return response()->json(['message' => 'Alertas eliminadas con éxito.']);
+    }
+
+    /**
      * Eliminar una alerta.
      */
     public function destroy($id)
